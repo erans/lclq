@@ -14,8 +14,10 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info};
 
 use crate::config::LclqConfig;
+use crate::server::shutdown::shutdown_receiver;
 use crate::sqs::{SqsHandler, SqsRequest};
 use crate::storage::StorageBackend;
+use tokio::sync::broadcast;
 
 /// SQS server state.
 #[derive(Clone)]
@@ -27,6 +29,7 @@ struct SqsServerState {
 pub async fn start_sqs_server(
     backend: Arc<dyn StorageBackend>,
     config: LclqConfig,
+    shutdown_rx: broadcast::Receiver<()>,
 ) -> anyhow::Result<()> {
     let bind_addr = format!("{}:{}", config.server.bind_address, config.server.sqs_port);
 
@@ -43,8 +46,11 @@ pub async fn start_sqs_server(
     info!(address = %bind_addr, "Starting SQS HTTP server");
 
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_receiver(shutdown_rx))
+        .await?;
 
+    info!("SQS HTTP server shut down gracefully");
     Ok(())
 }
 

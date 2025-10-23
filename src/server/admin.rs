@@ -9,9 +9,11 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tracing::{error, info};
 
+use crate::server::shutdown::shutdown_receiver;
 use crate::storage::StorageBackend;
 use crate::types::{QueueConfig, QueueType};
 
@@ -291,6 +293,7 @@ async fn purge_queue(
 pub async fn start_admin_server(
     backend: Arc<dyn StorageBackend>,
     port: u16,
+    shutdown_rx: broadcast::Receiver<()>,
 ) -> anyhow::Result<()> {
     let state = AdminState { backend };
 
@@ -311,9 +314,13 @@ pub async fn start_admin_server(
     info!("Admin API server listening on {}", addr);
 
     axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_receiver(shutdown_rx))
         .await
         .map_err(|e| {
             error!("Admin API server error: {}", e);
             anyhow::anyhow!("Admin API server failed: {}", e)
-        })
+        })?;
+
+    info!("Admin API server shut down gracefully");
+    Ok(())
 }

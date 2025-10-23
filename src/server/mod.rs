@@ -5,3 +5,6 @@ pub mod admin;
 
 /// Metrics HTTP server
 pub mod metrics;
+
+/// Graceful shutdown handling
+pub mod shutdown;

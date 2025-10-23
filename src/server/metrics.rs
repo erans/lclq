@@ -5,9 +5,11 @@ use axum::{
     routing::get,
     Router,
 };
+use tokio::sync::broadcast;
 use tracing::{error, info};
 
 use crate::metrics;
+use crate::server::shutdown::shutdown_receiver;
 
 /// Metrics endpoint handler
 async fn metrics_handler() -> Response {
@@ -21,7 +23,7 @@ async fn metrics_handler() -> Response {
 }
 
 /// Start the metrics HTTP server
-pub async fn start_metrics_server(port: u16) -> anyhow::Result<()> {
+pub async fn start_metrics_server(port: u16, shutdown_rx: broadcast::Receiver<()>) -> anyhow::Result<()> {
     let app = Router::new().route("/metrics", get(metrics_handler));
 
     let addr = format!("127.0.0.1:{}", port);
@@ -29,8 +31,14 @@ pub async fn start_metrics_server(port: u16) -> anyhow::Result<()> {
 
     info!("Metrics server listening on {}", addr);
 
-    axum::serve(listener, app).await.map_err(|e| {
-        error!("Metrics server error: {}", e);
-        anyhow::anyhow!("Metrics server failed: {}", e)
-    })
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_receiver(shutdown_rx))
+        .await
+        .map_err(|e| {
+            error!("Metrics server error: {}", e);
+            anyhow::anyhow!("Metrics server failed: {}", e)
+        })?;
+
+    info!("Metrics server shut down gracefully");
+    Ok(())
 }

@@ -1,7 +1,7 @@
 # lclq Implementation TODO
 
 **Status:** Ready for Implementation
-**Last Updated:** October 2025 (Phase 6 Management & Operations - IN PROGRESS)
+**Last Updated:** October 2025 (Phase 6 Management & Operations - COMPLETE ✅)
 
 This document tracks all implementation tasks for lclq based on the PRD and Technical PRD.
 
@@ -559,7 +559,7 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 
 ---
 
-## Phase 6: Management & Operations (Week 9) 🚧 IN PROGRESS
+## Phase 6: Management & Operations (Week 9) ✅ COMPLETE
 
 ### 6.1 CLI Tool ✅ COMPLETE
 - [x] Implement CLI in `src/main.rs` and `src/cli/`
@@ -619,14 +619,24 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Prometheus exposition format
 - [ ] Add metric recording throughout codebase (future enhancement)
 
-### 6.4 Graceful Shutdown
-- [ ] Implement shutdown handling in `src/server/shutdown.rs`
-  - [ ] Listen for SIGTERM/SIGINT
-  - [ ] Stop accepting new connections
-  - [ ] Complete in-flight requests
+### 6.4 Graceful Shutdown ✅ COMPLETE
+- [x] Implement shutdown handling in `src/server/shutdown.rs`
+  - [x] Listen for SIGTERM/SIGINT
+  - [x] Stop accepting new connections
+  - [x] Complete in-flight requests
   - [ ] Flush metrics
   - [ ] Close database connections
-  - [ ] Configurable timeout (default 30s)
+  - [x] Configurable timeout (default 30s)
+- [x] Integration with all servers
+  - [x] SQS HTTP server shutdown coordination
+  - [x] Admin API server shutdown coordination
+  - [x] Metrics server shutdown coordination
+  - [x] Broadcast shutdown signal to all servers
+  - [x] Wait for graceful shutdown with timeout
+- [x] Testing
+  - [x] SIGTERM signal handling verified
+  - [x] All servers shut down gracefully
+  - [x] Proper logging at each shutdown step
 
 ---
 
