@@ -562,22 +562,23 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 ## Phase 6: Management & Operations (Week 9) 🚧 IN PROGRESS
 
 ### 6.1 CLI Tool
-- [ ] Implement CLI in `src/main.rs` and `src/cli/`
-  - [ ] Use clap for argument parsing
-  - [ ] `lclq start` - start server
-  - [ ] `lclq queue` - queue management subcommands
-    - [ ] `lclq queue list` - list all queues
-    - [ ] `lclq queue create <name>` - create queue
-    - [ ] `lclq queue delete <name>` - delete queue
-    - [ ] `lclq queue purge <name>` - purge queue
-    - [ ] `lclq queue stats <name>` - show queue stats
-  - [ ] `lclq health` - health check
-  - [ ] `lclq stats` - overall statistics
-  - [ ] `lclq config` - show current configuration
-- [ ] CLI output formatting
-  - [ ] Human-readable table format
-  - [ ] JSON output option
-  - [ ] Color support with termcolor
+- [x] Implement CLI in `src/main.rs` and `src/cli/`
+  - [x] Use clap for argument parsing
+  - [x] `lclq start` - start server
+  - [x] `lclq queue` - queue management subcommands
+    - [x] `lclq queue list` - list all queues (stub implementation)
+    - [x] `lclq queue create <name>` - create queue (stub implementation)
+    - [x] `lclq queue delete <name>` - delete queue (stub implementation)
+    - [x] `lclq queue purge <name>` - purge queue (stub implementation)
+    - [x] `lclq queue stats <name>` - show queue stats (stub implementation)
+  - [x] `lclq health` - health check (stub implementation)
+  - [x] `lclq stats` - overall statistics (stub implementation)
+  - [x] `lclq config` - show current configuration (stub implementation)
+- [x] CLI output formatting
+  - [x] Human-readable table format
+  - [x] JSON output option
+  - [x] Color support with colored crate
+- [ ] Connect CLI commands to Admin API (pending Admin API implementation)
 
 ### 6.2 Admin API
 - [ ] Implement admin API in `src/server/admin.rs`
