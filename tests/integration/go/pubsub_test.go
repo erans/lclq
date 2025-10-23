@@ -429,8 +429,6 @@ func TestPublishWithAttributes(t *testing.T) {
 
 // TestPublishAndPull tests the full publish-subscribe cycle
 func TestPublishAndPull(t *testing.T) {
-	t.Skip("Skipping: Go SDK's subscription.Receive() uses StreamingPull which is not yet implemented in lclq (see TODO.md section 4.8)")
-
 	client, ctx := setupClient(t)
 	defer client.Close()
 
@@ -513,8 +511,6 @@ func TestPublishAndPull(t *testing.T) {
 
 // TestMessageOrdering tests message ordering with ordering keys
 func TestMessageOrdering(t *testing.T) {
-	t.Skip("Skipping: Go SDK's subscription.Receive() uses StreamingPull which is not yet implemented in lclq (see TODO.md section 4.8)")
-
 	client, ctx := setupClient(t)
 	defer client.Close()
 
@@ -605,8 +601,6 @@ func TestMessageOrdering(t *testing.T) {
 
 // TestModifyAckDeadline tests modifying acknowledgment deadline
 func TestModifyAckDeadline(t *testing.T) {
-	t.Skip("Skipping: Go SDK's subscription.Receive() uses StreamingPull which is not yet implemented in lclq (see TODO.md section 4.8)")
-
 	client, ctx := setupClient(t)
 	defer client.Close()
 

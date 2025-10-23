@@ -22,6 +22,7 @@ use crate::types::{ReceiveOptions, SubscriptionConfig};
 use base64::Engine;
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info};
 
@@ -454,10 +455,165 @@ impl Subscriber for SubscriberService {
     /// Establishes a stream with the server for receiving messages.
     async fn streaming_pull(
         &self,
-        _request: Request<tonic::Streaming<StreamingPullRequest>>,
+        request: Request<tonic::Streaming<StreamingPullRequest>>,
     ) -> std::result::Result<Response<Self::StreamingPullStream>, Status> {
-        // TODO: Implement bidirectional streaming pull
-        Err(Status::unimplemented("StreamingPull not yet implemented"))
+        let mut in_stream = request.into_inner();
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
+        let backend = self.backend.clone();
+
+        // Spawn a task to handle the bidirectional stream
+        tokio::spawn(async move {
+            let mut subscription_id: Option<String> = None;
+            let mut topic_id: Option<String> = None;
+            let mut ack_deadline = 10; // Default 10 seconds
+
+            // Main stream loop
+            loop {
+                tokio::select! {
+                    // Handle incoming requests from client (acks, modify deadlines)
+                    Some(result) = in_stream.next() => {
+                        match result {
+                            Ok(req) => {
+                                debug!("StreamingPull request: subscription={}", req.subscription);
+
+                                // Initialize subscription on first request
+                                if subscription_id.is_none() {
+                                    // Parse subscription name
+                                    match ResourceName::parse(&req.subscription) {
+                                        Ok(resource_name) => {
+                                            let sub_id = format!(
+                                                "{}:{}",
+                                                resource_name.project(),
+                                                resource_name.resource_id()
+                                            );
+
+                                            // Get subscription config to find topic
+                                            match backend.get_subscription(&sub_id).await {
+                                                Ok(config) => {
+                                                    subscription_id = Some(sub_id.clone());
+                                                    topic_id = Some(config.topic_id.clone());
+
+                                                    if req.stream_ack_deadline_seconds > 0 {
+                                                        ack_deadline = req.stream_ack_deadline_seconds as u32;
+                                                    }
+
+                                                    debug!("StreamingPull initialized for subscription: {}, topic: {}", sub_id, config.topic_id);
+                                                }
+                                                Err(e) => {
+                                                    let _ = tx.send(Err(Status::not_found(format!("Subscription not found: {}", e)))).await;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            let _ = tx.send(Err(Status::invalid_argument(format!("Invalid subscription name: {}", e)))).await;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                // Process acknowledgments
+                                if !req.ack_ids.is_empty() {
+                                    if let (Some(topic), Some(_)) = (&topic_id, &subscription_id) {
+                                        for ack_id in &req.ack_ids {
+                                            if let Err(e) = backend.delete_message(topic, ack_id).await {
+                                                debug!("Failed to acknowledge message {}: {}", ack_id, e);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Process modify deadline requests
+                                if !req.modify_deadline_ack_ids.is_empty() {
+                                    if let (Some(topic), Some(_)) = (&topic_id, &subscription_id) {
+                                        for (i, ack_id) in req.modify_deadline_ack_ids.iter().enumerate() {
+                                            let deadline = req.modify_deadline_seconds.get(i).copied().unwrap_or(10);
+                                            if let Err(e) = backend.change_visibility(topic, ack_id, deadline as u32).await {
+                                                debug!("Failed to modify deadline for {}: {}", ack_id, e);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                debug!("StreamingPull stream error: {}", e);
+                                break;
+                            }
+                        }
+                    }
+
+                    // Poll for messages to send to client
+                    _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                        if let (Some(topic), Some(_)) = (&topic_id, &subscription_id) {
+                            let options = ReceiveOptions {
+                                max_messages: 10, // Pull up to 10 messages at a time
+                                visibility_timeout: Some(ack_deadline),
+                                wait_time_seconds: 0,
+                                attribute_names: vec![],
+                                message_attribute_names: vec![],
+                            };
+
+                            match backend.receive_messages(topic, options).await {
+                                Ok(messages) => {
+                                    if !messages.is_empty() {
+                                        // Convert to ReceivedMessage format
+                                        let received_messages: Vec<ReceivedMessage> = messages
+                                            .into_iter()
+                                            .map(|msg| {
+                                                // Decode base64 body
+                                                let data = base64::engine::general_purpose::STANDARD
+                                                    .decode(&msg.message.body)
+                                                    .unwrap_or_else(|_| msg.message.body.as_bytes().to_vec());
+
+                                                // Convert message attributes to simple string map
+                                                let attributes: std::collections::HashMap<String, String> = msg
+                                                    .message
+                                                    .attributes
+                                                    .iter()
+                                                    .map(|(k, v)| (k.clone(), v.string_value.clone().unwrap_or_default()))
+                                                    .collect();
+
+                                                ReceivedMessage {
+                                                    ack_id: msg.receipt_handle,
+                                                    message: Some(PubsubMessage {
+                                                        data,
+                                                        attributes,
+                                                        message_id: msg.message.id.to_string(),
+                                                        publish_time: Some(prost_types::Timestamp {
+                                                            seconds: msg.message.sent_timestamp.timestamp(),
+                                                            nanos: msg.message.sent_timestamp.timestamp_subsec_nanos() as i32,
+                                                        }),
+                                                        ordering_key: msg.message.message_group_id.unwrap_or_default(),
+                                                    }),
+                                                    delivery_attempt: msg.message.receive_count as i32,
+                                                }
+                                            })
+                                            .collect();
+
+                                        let response = StreamingPullResponse {
+                                            received_messages,
+                                            subscription_properties: None,
+                                        };
+
+                                        if tx.send(Ok(response)).await.is_err() {
+                                            debug!("Client disconnected");
+                                            break;
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    debug!("Failed to receive messages: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            debug!("StreamingPull ended");
+        });
+
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 
     /// Modifies the `PushConfig` for a specified subscription.

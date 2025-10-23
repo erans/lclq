@@ -422,8 +422,9 @@ impl StorageBackend for InMemoryBackend {
         let max_messages = options.max_messages.min(10) as usize;
 
         // For FIFO queues, we need to respect message group ordering
+        // For Pub/Sub topics, we deliver in queue order but don't block on in-flight groups
         if queue.config.queue_type == QueueType::SqsFifo {
-            // Track which message groups are already in flight
+            // Track which message groups are already in flight (SQS FIFO only)
             let in_flight_groups: std::collections::HashSet<_> = queue
                 .in_flight_messages
                 .values()
@@ -441,12 +442,48 @@ impl StorageBackend for InMemoryBackend {
                     continue;
                 }
 
-                // For FIFO, skip if this message group is already in flight
+                // For SQS FIFO, skip if this message group is already in flight
                 if let Some(ref group_id) = stored.message.message_group_id {
                     if in_flight_groups.contains(group_id) {
                         i += 1;
                         continue;
                     }
+                }
+
+                // Remove from available messages
+                let stored = queue.available_messages.remove(i).unwrap();
+                let mut message = stored.message;
+                message.receive_count += 1;
+
+                // Generate receipt handle
+                let receipt_handle = generate_receipt_handle(queue_id, &message.id);
+
+                // Add to in-flight
+                let visibility_expires_at = now + Duration::seconds(visibility_timeout as i64);
+                queue.in_flight_messages.insert(
+                    message.id.0.clone(),
+                    InFlightMessage {
+                        message: message.clone(),
+                        visibility_expires_at,
+                    },
+                );
+
+                received.push(ReceivedMessage {
+                    message,
+                    receipt_handle,
+                });
+            }
+        } else if queue.config.queue_type == QueueType::PubSubTopic {
+            // Pub/Sub topics: Deliver in order from queue, but allow multiple messages
+            // with same ordering key to be in-flight (client handles ordering via acks)
+            let mut i = 0;
+            while i < queue.available_messages.len() && received.len() < max_messages {
+                let stored = &queue.available_messages[i];
+
+                // Check if message is visible
+                if stored.visible_at > now {
+                    i += 1;
+                    continue;
                 }
 
                 // Remove from available messages
