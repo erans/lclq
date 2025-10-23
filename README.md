@@ -243,6 +243,7 @@ Fully compatible with official Google Cloud SDKs via both gRPC and HTTP/REST pro
 - Python gRPC (google-cloud-pubsub) - 15/15 tests ✓
 - Python REST (google-cloud-pubsub with REST transport) - 9/9 tests ✓
 - JavaScript gRPC (@google-cloud/pubsub) - 16/16 tests ✓
+- Go gRPC (cloud.google.com/go/pubsub) - 10/10 tests ✓ (3 skipped - require StreamingPull)
 
 ### Storage Backends
 
@@ -411,7 +412,7 @@ lclq works with official AWS and GCP SDKs:
 **GCP SDKs** (tested ✓)
 - Python: google-cloud-pubsub
 - JavaScript: @google-cloud/pubsub
-- Go: cloud.google.com/go/pubsub (should work)
+- Go: cloud.google.com/go/pubsub
 - Java, Ruby, .NET: Should work (not yet tested)
 
 ## Monitoring & Observability

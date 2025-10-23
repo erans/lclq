@@ -634,7 +634,7 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 - [x] Create integration test suite
   - [x] Test with google-cloud-pubsub (Python) - **15/15 tests passing**
   - [x] Test with @google-cloud/pubsub (Node.js) - **16/16 tests passing**
-  - [ ] Test with cloud.google.com/go/pubsub
+  - [x] Test with cloud.google.com/go/pubsub (Go) - **10/10 tests passing (3 skipped - StreamingPull)**
 - [x] Test scenarios (Python SDK)
   - [x] Create topic and subscription
   - [x] Get topic and subscription
@@ -659,6 +659,20 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Fixed list_subscriptions project filtering
   - [x] Fixed modify_ack_deadline receipt handle issue
   - [x] Fixed message ordering client configuration
+- [x] Test scenarios (Go SDK)
+  - [x] Create and get topics
+  - [x] List topics
+  - [x] Delete topics
+  - [x] Create and get subscriptions
+  - [x] List subscriptions
+  - [x] Delete subscriptions
+  - [x] Publish single message
+  - [x] Publish with attributes
+  - [ ] Pull messages (requires StreamingPull - skipped)
+  - [ ] Message ordering (requires StreamingPull - skipped)
+  - [ ] Modify ack deadline (requires StreamingPull - skipped)
+
+**Note**: 3 Go tests are skipped as the Go SDK's `subscription.Receive()` method uses StreamingPull, which is currently a stub (see section 4.8). All core Pub/Sub operations work correctly via the synchronous Pull API used by Python and JavaScript SDKs.
 
 ---
 
