@@ -7,6 +7,7 @@ use tracing::info;
 
 use crate::config::LclqConfig;
 use crate::core::cleanup::CleanupManager;
+use crate::pubsub::grpc_server::{start_grpc_server, GrpcServerConfig};
 use crate::server::admin::start_admin_server;
 use crate::server::metrics::start_metrics_server;
 use crate::server::shutdown::{shutdown_with_timeout, ShutdownSignal};
@@ -18,6 +19,7 @@ use crate::storage::StorageBackend;
 /// Execute the start command - launches the lclq server with all services
 pub async fn execute(
     sqs_port: u16,
+    pubsub_port: u16,
     admin_port: u16,
     metrics_port: u16,
     bind_address: String,
@@ -36,6 +38,7 @@ pub async fn execute(
 
     info!("Configuration loaded successfully");
     info!("SQS port: {}", config.server.sqs_port);
+    info!("Pub/Sub port: {}", pubsub_port);
     info!("Admin port: {}", config.server.admin_port);
     info!("Metrics port: {}", metrics_port);
     info!("Bind address: {}", config.server.bind_address);
@@ -80,6 +83,7 @@ pub async fn execute(
     // Clone backend for servers
     let admin_backend = storage_backend.clone();
     let sqs_backend = storage_backend.clone();
+    let pubsub_backend = storage_backend.clone();
 
     // Start Admin API server in background
     let admin_shutdown_rx = shutdown_signal.subscribe();
@@ -107,13 +111,25 @@ pub async fn execute(
         }
     });
 
+    // Start Pub/Sub gRPC server in background
+    let pubsub_shutdown_rx = shutdown_signal.subscribe();
+    let pubsub_bind_address = bind_address.clone();
+    let pubsub_handle = tokio::spawn(async move {
+        let grpc_config = GrpcServerConfig {
+            bind_address: format!("{}:{}", pubsub_bind_address, pubsub_port),
+        };
+        if let Err(e) = start_grpc_server(grpc_config, pubsub_backend, pubsub_shutdown_rx).await {
+            tracing::error!("Pub/Sub gRPC server error: {}", e);
+        }
+    });
+
     info!("All servers started successfully");
 
     // Wait for shutdown signal and coordinate graceful shutdown
     shutdown_with_timeout(shutdown_signal, Duration::from_secs(30)).await?;
 
     // Wait for all servers to complete shutdown
-    let _ = tokio::join!(admin_handle, metrics_handle, sqs_handle);
+    let _ = tokio::join!(admin_handle, metrics_handle, sqs_handle, pubsub_handle);
 
     info!("All servers shut down. Exiting.");
     Ok(())

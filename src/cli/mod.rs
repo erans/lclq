@@ -25,6 +25,10 @@ pub enum Commands {
         #[arg(long, env = "LCLQ_SQS_PORT", default_value = "9324")]
         sqs_port: u16,
 
+        /// Pub/Sub gRPC port
+        #[arg(long, env = "LCLQ_PUBSUB_PORT", default_value = "8085")]
+        pubsub_port: u16,
+
         /// Admin API port
         #[arg(long, env = "LCLQ_ADMIN_PORT", default_value = "9000")]
         admin_port: u16,
