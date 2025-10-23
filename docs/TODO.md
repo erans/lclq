@@ -230,9 +230,9 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] `SetQueueAttributes` - modify queue attributes
   - [x] `ListQueues` - list queues with prefix filter
   - [x] `PurgeQueue` - remove all messages
-  - [ ] `TagQueue` - add tags to queue
-  - [ ] `UntagQueue` - remove tags from queue
-  - [ ] `ListQueueTags` - list queue tags
+  - [x] `TagQueue` - add tags to queue
+  - [x] `UntagQueue` - remove tags from queue
+  - [x] `ListQueueTags` - list queue tags
 - [x] Implement message operations
   - [x] `SendMessage` - send single message
   - [x] `SendMessageBatch` - send up to 10 messages
@@ -264,7 +264,7 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Scheduled delivery
 - [x] Implement message retention
   - [x] MessageRetentionPeriod attribute (60-1209600 seconds)
-  - [ ] Background task to delete expired messages
+  - [x] Background task to delete expired messages
 
 ### 2.5 SQS HTTP Server
 - [x] Implement HTTP server in `src/sqs/server.rs`

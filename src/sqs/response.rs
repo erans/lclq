@@ -367,7 +367,7 @@ pub struct MessageAttributeInfo {
 }
 
 /// Escape XML special characters.
-fn escape_xml(s: &str) -> String {
+pub fn escape_xml(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")

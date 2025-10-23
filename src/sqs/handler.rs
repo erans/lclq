@@ -13,7 +13,7 @@ use crate::sqs::{
     build_get_queue_attributes_response, build_get_queue_url_response,
     build_list_queues_response, build_receive_message_response,
     build_send_message_batch_response, build_send_message_response,
-    calculate_md5_of_attributes, calculate_md5_of_body, extract_queue_name_from_url,
+    calculate_md5_of_attributes, calculate_md5_of_body, escape_xml, extract_queue_name_from_url,
     BatchErrorEntry, BatchResultEntry, MessageAttributeInfo, ReceivedMessageInfo, SqsAction,
     SqsErrorCode, SqsRequest,
 };
@@ -62,10 +62,9 @@ impl SqsHandler {
             SqsAction::PurgeQueue => self.handle_purge_queue(request).await,
             SqsAction::GetQueueAttributes => self.handle_get_queue_attributes(request).await,
             SqsAction::SetQueueAttributes => self.handle_set_queue_attributes(request).await,
-            _ => build_error_response(
-                SqsErrorCode::InvalidParameterValue,
-                "Action not yet implemented",
-            ),
+            SqsAction::TagQueue => self.handle_tag_queue(request).await,
+            SqsAction::UntagQueue => self.handle_untag_queue(request).await,
+            SqsAction::ListQueueTags => self.handle_list_queue_tags(request).await,
         };
 
         // Convert to JSON if request was JSON
@@ -991,6 +990,151 @@ impl SqsHandler {
             }
             Err(e) => build_error_response(SqsErrorCode::InternalError, &e.to_string()),
         }
+    }
+
+    async fn handle_tag_queue(&self, request: SqsRequest) -> String {
+        let queue_url = match request.get_required_param("QueueUrl") {
+            Ok(url) => url,
+            Err(e) => return build_error_response(SqsErrorCode::MissingParameter, &e),
+        };
+
+        let queue_name = match extract_queue_name_from_url(queue_url) {
+            Some(name) => name,
+            None => {
+                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+            }
+        };
+
+        // Get current queue configuration
+        let mut queue_config = match self.backend.get_queue(&queue_name).await {
+            Ok(config) => config,
+            Err(_) => {
+                return build_error_response(
+                    SqsErrorCode::QueueDoesNotExist,
+                    "The specified queue does not exist",
+                )
+            }
+        };
+
+        // Parse tags from request (Tag.N.Key and Tag.N.Value)
+        let mut i = 1;
+        loop {
+            let key_param = format!("Tag.{}.Key", i);
+            let value_param = format!("Tag.{}.Value", i);
+
+            match (request.get_param(&key_param), request.get_param(&value_param)) {
+                (Some(key), Some(value)) => {
+                    queue_config.tags.insert(key.to_string(), value.to_string());
+                    i += 1;
+                }
+                _ => break,
+            }
+        }
+
+        // Update the queue
+        match self.backend.update_queue(queue_config).await {
+            Ok(_) => {
+                info!(queue_name = %queue_name, "Queue tags added");
+                build_delete_message_response() // TagQueue has empty response
+            }
+            Err(e) => build_error_response(SqsErrorCode::InternalError, &e.to_string()),
+        }
+    }
+
+    async fn handle_untag_queue(&self, request: SqsRequest) -> String {
+        let queue_url = match request.get_required_param("QueueUrl") {
+            Ok(url) => url,
+            Err(e) => return build_error_response(SqsErrorCode::MissingParameter, &e),
+        };
+
+        let queue_name = match extract_queue_name_from_url(queue_url) {
+            Some(name) => name,
+            None => {
+                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+            }
+        };
+
+        // Get current queue configuration
+        let mut queue_config = match self.backend.get_queue(&queue_name).await {
+            Ok(config) => config,
+            Err(_) => {
+                return build_error_response(
+                    SqsErrorCode::QueueDoesNotExist,
+                    "The specified queue does not exist",
+                )
+            }
+        };
+
+        // Parse tag keys to remove (TagKey.N)
+        let mut i = 1;
+        loop {
+            let key_param = format!("TagKey.{}", i);
+
+            match request.get_param(&key_param) {
+                Some(key) => {
+                    queue_config.tags.remove(key);
+                    i += 1;
+                }
+                None => break,
+            }
+        }
+
+        // Update the queue
+        match self.backend.update_queue(queue_config).await {
+            Ok(_) => {
+                info!(queue_name = %queue_name, "Queue tags removed");
+                build_delete_message_response() // UntagQueue has empty response
+            }
+            Err(e) => build_error_response(SqsErrorCode::InternalError, &e.to_string()),
+        }
+    }
+
+    async fn handle_list_queue_tags(&self, request: SqsRequest) -> String {
+        let queue_url = match request.get_required_param("QueueUrl") {
+            Ok(url) => url,
+            Err(e) => return build_error_response(SqsErrorCode::MissingParameter, &e),
+        };
+
+        let queue_name = match extract_queue_name_from_url(queue_url) {
+            Some(name) => name,
+            None => {
+                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+            }
+        };
+
+        // Get queue configuration
+        let queue_config = match self.backend.get_queue(&queue_name).await {
+            Ok(config) => config,
+            Err(_) => {
+                return build_error_response(
+                    SqsErrorCode::QueueDoesNotExist,
+                    "The specified queue does not exist",
+                )
+            }
+        };
+
+        // Build response with tags
+        let mut response = String::from(
+            r#"<?xml version="1.0"?><ListQueueTagsResponse xmlns="http://queue.amazonaws.com/doc/2012-11-05/"><ListQueueTagsResult>"#,
+        );
+
+        if !queue_config.tags.is_empty() {
+            for (key, value) in &queue_config.tags {
+                response.push_str(&format!(
+                    "<Tag><Key>{}</Key><Value>{}</Value></Tag>",
+                    escape_xml(key),
+                    escape_xml(value)
+                ));
+            }
+        }
+
+        response.push_str(&format!(
+            r#"</ListQueueTagsResult><ResponseMetadata><RequestId>{}</RequestId></ResponseMetadata></ListQueueTagsResponse>"#,
+            uuid::Uuid::new_v4()
+        ));
+
+        info!(queue_name = %queue_name, tag_count = queue_config.tags.len(), "Queue tags listed");
+        response
     }
 
     /// Add a queue attribute to the attributes list.

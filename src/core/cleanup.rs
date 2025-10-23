@@ -50,6 +50,11 @@ impl CleanupManager {
                 error!(error = %e, "Error cleaning up deduplication cache");
             }
 
+            // Delete expired messages past retention period
+            if let Err(e) = self.backend.delete_expired_messages().await {
+                error!(error = %e, "Error deleting expired messages");
+            }
+
             debug!("Cleanup tasks completed");
         }
     }

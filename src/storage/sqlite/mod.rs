@@ -126,6 +126,55 @@ impl SqliteBackend {
         Ok(count)
     }
 
+    /// Delete messages that have exceeded their retention period.
+    pub async fn delete_expired_messages(&self) -> Result<u64> {
+        let now = Utc::now().timestamp_millis();
+
+        // Get all queues to check their retention periods
+        let queues = sqlx::query(
+            "SELECT id, message_retention_period FROM queues"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::StorageError(format!("Failed to get queues for retention cleanup: {}", e)))?;
+
+        let mut total_deleted = 0u64;
+
+        for row in queues {
+            let queue_id: String = row.get("id");
+            let retention_period_secs: i64 = row.get("message_retention_period");
+            let retention_millis = retention_period_secs * 1000;
+
+            // Delete messages older than retention period
+            let cutoff_timestamp = now - retention_millis;
+
+            let result = sqlx::query(
+                "DELETE FROM messages WHERE queue_id = ? AND sent_timestamp < ?"
+            )
+            .bind(&queue_id)
+            .bind(cutoff_timestamp)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::StorageError(format!("Failed to delete expired messages: {}", e)))?;
+
+            let count = result.rows_affected();
+            if count > 0 {
+                info!(
+                    queue_id = %queue_id,
+                    messages_deleted = count,
+                    "Deleted expired messages past retention period"
+                );
+                total_deleted += count;
+            }
+        }
+
+        if total_deleted > 0 {
+            info!(total_deleted = total_deleted, "Deleted expired messages across all queues");
+        }
+
+        Ok(total_deleted)
+    }
+
     /// Helper: Convert QueueType to string for database storage.
     fn queue_type_to_string(queue_type: &QueueType) -> &'static str {
         match queue_type {
