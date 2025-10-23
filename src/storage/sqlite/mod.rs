@@ -65,7 +65,7 @@ impl SqliteBackend {
             .map_err(|e| Error::StorageError(format!("Failed to connect to SQLite: {}", e)))?;
 
         // Run migrations
-        sqlx::migrate!("./migrations")
+        sqlx::migrate!("./migrations/sqlite")
             .run(&pool)
             .await
             .map_err(|e| Error::StorageError(format!("Failed to run migrations: {}", e)))?;
