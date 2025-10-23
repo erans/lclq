@@ -1,3 +1,9 @@
 //! AWS SQS dialect implementation.
 
-// TODO: Implement SQS protocol
+pub mod request;
+pub mod response;
+pub mod types;
+
+pub use request::*;
+pub use response::*;
+pub use types::*;

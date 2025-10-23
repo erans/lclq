@@ -46,5 +46,17 @@ base64 = "0.22"
 
 # Cryptography
 sha2 = "0.10"
+md-5 = "0.10"
+
+# HTTP server
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+
+# URL encoding/decoding
+urlencoding = "2.1"
+
+# XML handling
+quick-xml = { version = "0.37", features = ["serialize"] }
 
 [dev-dependencies]
