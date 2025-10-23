@@ -561,38 +561,39 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 
 ## Phase 6: Management & Operations (Week 9) 🚧 IN PROGRESS
 
-### 6.1 CLI Tool
+### 6.1 CLI Tool ✅ COMPLETE
 - [x] Implement CLI in `src/main.rs` and `src/cli/`
   - [x] Use clap for argument parsing
   - [x] `lclq start` - start server
   - [x] `lclq queue` - queue management subcommands
-    - [x] `lclq queue list` - list all queues (stub implementation)
-    - [x] `lclq queue create <name>` - create queue (stub implementation)
-    - [x] `lclq queue delete <name>` - delete queue (stub implementation)
-    - [x] `lclq queue purge <name>` - purge queue (stub implementation)
-    - [x] `lclq queue stats <name>` - show queue stats (stub implementation)
-  - [x] `lclq health` - health check (stub implementation)
-  - [x] `lclq stats` - overall statistics (stub implementation)
+    - [x] `lclq queue list` - list all queues
+    - [x] `lclq queue create <name>` - create queue
+    - [x] `lclq queue delete <name>` - delete queue
+    - [x] `lclq queue purge <name>` - purge queue
+    - [x] `lclq queue stats <name>` - show queue stats
+  - [x] `lclq health` - health check
+  - [x] `lclq stats` - overall statistics
   - [x] `lclq config` - show current configuration (stub implementation)
 - [x] CLI output formatting
   - [x] Human-readable table format
   - [x] JSON output option
   - [x] Color support with colored crate
-- [ ] Connect CLI commands to Admin API (pending Admin API implementation)
+- [x] Connect CLI commands to Admin API
 
-### 6.2 Admin API
-- [ ] Implement admin API in `src/server/admin.rs`
-  - [ ] `GET /health` - health check endpoint
-  - [ ] `GET /stats` - system statistics
-  - [ ] `GET /queues` - list all queues
-  - [ ] `GET /queues/{id}` - queue details
-  - [ ] `DELETE /queues/{id}` - delete queue
-  - [ ] `POST /queues/{id}/purge` - purge queue
+### 6.2 Admin API ✅ COMPLETE
+- [x] Implement admin API in `src/server/admin.rs`
+  - [x] `GET /health` - health check endpoint
+  - [x] `GET /stats` - system statistics
+  - [x] `GET /queues` - list all queues
+  - [x] `GET /queues/{name}` - queue details
+  - [x] `POST /queues` - create queue
+  - [x] `DELETE /queues/{name}` - delete queue
+  - [x] `POST /queues/{name}/purge` - purge queue
   - [ ] `GET /config` - current configuration
-- [ ] Admin server setup
-  - [ ] Separate port (9000)
+- [x] Admin server setup
+  - [x] Separate port (9000)
   - [ ] Optional authentication
-  - [ ] CORS support
+  - [x] CORS support
 
 ### 6.3 Metrics and Monitoring
 - [ ] Implement Prometheus metrics in `src/metrics/`
