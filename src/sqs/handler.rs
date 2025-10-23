@@ -147,6 +147,42 @@ impl SqsHandler {
             None
         };
 
+        // Parse redrive allow policy
+        let redrive_allow_policy = if let Some(rap_json) = attributes.get("RedriveAllowPolicy") {
+            match serde_json::from_str::<serde_json::Value>(rap_json) {
+                Ok(policy) => {
+                    use crate::types::{RedriveAllowPolicy, RedrivePermission};
+
+                    let permission_str = policy["redrivePermission"].as_str();
+
+                    permission_str.and_then(|perm| {
+                        let permission = match perm {
+                            "allowAll" => Some(RedrivePermission::AllowAll),
+                            "denyAll" => Some(RedrivePermission::DenyAll),
+                            "byQueue" => {
+                                let source_arns = policy["sourceQueueArns"]
+                                    .as_array()
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                            .collect::<Vec<String>>()
+                                    })
+                                    .unwrap_or_default();
+
+                                Some(RedrivePermission::ByQueue { source_queue_arns: source_arns })
+                            }
+                            _ => None,
+                        };
+
+                        permission.map(|p| RedriveAllowPolicy { permission: p })
+                    })
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
         let queue_config = QueueConfig {
             id: queue_name.to_string(),
             name: queue_name.to_string(),
@@ -158,7 +194,7 @@ impl SqsHandler {
             dlq_config,
             content_based_deduplication,
             tags: std::collections::HashMap::new(),
-            redrive_allow_policy: None,
+            redrive_allow_policy,
         };
 
         // Create queue in backend
