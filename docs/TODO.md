@@ -195,90 +195,90 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 ## Phase 2: AWS SQS Implementation (Weeks 3-4)
 
 ### 2.1 SQS Data Types
-- [ ] Implement SQS-specific types in `src/sqs/types.rs`
-  - [ ] `SqsAction` enum with all actions
-  - [ ] `SqsMessage` struct
-  - [ ] `MessageAttributeValue` struct
-  - [ ] `QueueAttribute` enum
-  - [ ] `SqsError` enum
-  - [ ] MD5 hash calculation for message bodies
-  - [ ] MD5 hash calculation for attributes
+- [x] Implement SQS-specific types in `src/sqs/types.rs`
+  - [x] `SqsAction` enum with all actions
+  - [x] `SqsMessage` struct
+  - [x] `MessageAttributeValue` struct
+  - [x] `QueueAttribute` enum
+  - [x] `SqsError` enum
+  - [x] MD5 hash calculation for message bodies
+  - [x] MD5 hash calculation for attributes
 
 ### 2.2 SQS Request/Response Handling
-- [ ] Implement request parsing in `src/sqs/request.rs`
-  - [ ] Parse form-encoded POST bodies
-  - [ ] Extract Action parameter
-  - [ ] Parse queue URLs
-  - [ ] Parse message attributes
-  - [ ] Parse queue attributes
-  - [ ] Handle batch operations
-- [ ] Implement response generation in `src/sqs/response.rs`
-  - [ ] XML response builder
-  - [ ] Error response formatting
-  - [ ] Success response formatting
-  - [ ] Batch response formatting
-  - [ ] Include request IDs
+- [x] Implement request parsing in `src/sqs/request.rs`
+  - [x] Parse form-encoded POST bodies
+  - [x] Extract Action parameter
+  - [x] Parse queue URLs
+  - [x] Parse message attributes
+  - [x] Parse queue attributes
+  - [x] Handle batch operations
+- [x] Implement response generation in `src/sqs/response.rs`
+  - [x] XML response builder
+  - [x] Error response formatting
+  - [x] Success response formatting
+  - [x] Batch response formatting
+  - [x] Include request IDs
 
 ### 2.3 SQS Action Implementations
-- [ ] Implement queue management actions
-  - [ ] `CreateQueue` - create standard or FIFO queue
-  - [ ] `DeleteQueue` - remove queue
-  - [ ] `GetQueueUrl` - get URL from queue name
+- [x] Implement queue management actions
+  - [x] `CreateQueue` - create standard or FIFO queue
+  - [x] `DeleteQueue` - remove queue
+  - [x] `GetQueueUrl` - get URL from queue name
   - [ ] `GetQueueAttributes` - retrieve queue attributes
   - [ ] `SetQueueAttributes` - modify queue attributes
-  - [ ] `ListQueues` - list queues with prefix filter
-  - [ ] `PurgeQueue` - remove all messages
+  - [x] `ListQueues` - list queues with prefix filter
+  - [x] `PurgeQueue` - remove all messages
   - [ ] `TagQueue` - add tags to queue
   - [ ] `UntagQueue` - remove tags from queue
   - [ ] `ListQueueTags` - list queue tags
-- [ ] Implement message operations
-  - [ ] `SendMessage` - send single message
+- [x] Implement message operations
+  - [x] `SendMessage` - send single message
   - [ ] `SendMessageBatch` - send up to 10 messages
-  - [ ] `ReceiveMessage` - receive messages with long polling
-  - [ ] `DeleteMessage` - delete single message
+  - [x] `ReceiveMessage` - receive messages with long polling
+  - [x] `DeleteMessage` - delete single message
   - [ ] `DeleteMessageBatch` - delete up to 10 messages
   - [ ] `ChangeMessageVisibility` - update visibility timeout
   - [ ] `ChangeMessageVisibilityBatch` - batch visibility update
 
 ### 2.4 SQS-Specific Features
-- [ ] Implement FIFO queue support
-  - [ ] Message group ID handling
-  - [ ] Message deduplication ID handling
-  - [ ] Content-based deduplication
-  - [ ] Sequence number generation
-  - [ ] Ordering within message groups
-- [ ] Implement Dead Letter Queue
-  - [ ] Redrive policy parsing
-  - [ ] Max receive count tracking
-  - [ ] Automatic message movement to DLQ
+- [x] Implement FIFO queue support
+  - [x] Message group ID handling
+  - [x] Message deduplication ID handling
+  - [x] Content-based deduplication
+  - [x] Sequence number generation
+  - [x] Ordering within message groups
+- [x] Implement Dead Letter Queue
+  - [x] Redrive policy parsing
+  - [x] Max receive count tracking
+  - [x] Automatic message movement to DLQ
   - [ ] Redrive allow policy
-- [ ] Implement long polling
-  - [ ] WaitTimeSeconds parameter support
-  - [ ] Block until message available (up to 20 seconds)
-  - [ ] Return empty response after timeout
-- [ ] Implement delay queues
-  - [ ] DelaySeconds parameter (0-900)
-  - [ ] Per-message delay
-  - [ ] Scheduled delivery
-- [ ] Implement message retention
-  - [ ] MessageRetentionPeriod attribute (60-1209600 seconds)
+- [x] Implement long polling
+  - [x] WaitTimeSeconds parameter support
+  - [x] Block until message available (up to 20 seconds)
+  - [x] Return empty response after timeout
+- [x] Implement delay queues
+  - [x] DelaySeconds parameter (0-900)
+  - [x] Per-message delay
+  - [x] Scheduled delivery
+- [x] Implement message retention
+  - [x] MessageRetentionPeriod attribute (60-1209600 seconds)
   - [ ] Background task to delete expired messages
 
 ### 2.5 SQS HTTP Server
-- [ ] Implement HTTP server in `src/sqs/server.rs`
-  - [ ] Set up Axum router
-  - [ ] Handle POST requests
-  - [ ] Parse form-encoded bodies
-  - [ ] Route to action handlers
-  - [ ] Return XML responses
-  - [ ] Error handling middleware
+- [x] Implement HTTP server in `src/sqs/server.rs`
+  - [x] Set up Axum router
+  - [x] Handle POST requests
+  - [x] Parse form-encoded bodies
+  - [x] Route to action handlers
+  - [x] Return XML responses
+  - [x] Error handling middleware
 - [ ] Implement AWS Signature V4 verification (optional)
   - [ ] Parse Authorization header
   - [ ] Extract signature components
   - [ ] Verify signature (when enabled)
   - [ ] Make verification optional for local development
-- [ ] Add request logging and metrics
-- [ ] Add CORS support for browser access
+- [x] Add request logging and metrics
+- [x] Add CORS support for browser access
 - [ ] Add compression support (gzip)
 
 ### 2.6 SQS Integration Tests
