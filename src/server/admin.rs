@@ -292,6 +292,7 @@ async fn purge_queue(
 /// Start the Admin HTTP API server
 pub async fn start_admin_server(
     backend: Arc<dyn StorageBackend>,
+    bind_address: String,
     port: u16,
     shutdown_rx: broadcast::Receiver<()>,
 ) -> anyhow::Result<()> {
@@ -308,7 +309,7 @@ pub async fn start_admin_server(
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let addr = format!("127.0.0.1:{}", port);
+    let addr = format!("{}:{}", bind_address, port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     info!("Admin API server listening on {}", addr);

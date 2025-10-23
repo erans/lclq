@@ -1,0 +1,46 @@
+# Git
+.git/
+.gitignore
+.github/
+
+# Rust build artifacts
+target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Tests
+tests/
+examples/
+
+# CI/CD
+.github/
+
+# Local development
+.env
+.env.local
+*.db
+*.db-shm
+*.db-wal
+lclq.toml
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Other
+.claude/
+*.log

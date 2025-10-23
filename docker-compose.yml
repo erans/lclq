@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  lclq:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lclq:latest
+    container_name: lclq
+    restart: unless-stopped
+
+    ports:
+      # SQS HTTP API
+      - "9324:9324"
+      # Pub/Sub gRPC (future)
+      - "8085:8085"
+      # Pub/Sub HTTP (future)
+      - "8086:8086"
+      # Admin API
+      - "9000:9000"
+      # Prometheus Metrics
+      - "9090:9090"
+
+    volumes:
+      # Persistent storage for SQLite database
+      - lclq-data:/data
+      # Optional: Mount custom configuration
+      # - ./lclq.toml:/config/lclq.toml:ro
+
+    environment:
+      # Logging configuration
+      - RUST_LOG=info
+
+      # Bind to all interfaces for Docker (important!)
+      - LCLQ_BIND_ADDRESS=0.0.0.0
+
+      # Data directory (inside container)
+      - LCLQ_DATA_DIR=/data
+
+      # Optional: Override specific settings via environment variables
+      # - LCLQ_SQS_PORT=9324
+      # - LCLQ_ADMIN_PORT=9000
+      # - LCLQ_METRICS_PORT=9090
+
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/lclq", "health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+    # Resource limits (adjust based on your needs)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 512M
+
+volumes:
+  lclq-data:
+    driver: local

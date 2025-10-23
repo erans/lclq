@@ -74,10 +74,11 @@ pub async fn execute_command(command: Commands) -> anyhow::Result<()> {
             sqs_port,
             admin_port,
             metrics_port,
+            bind_address,
             backend,
             db_path,
         } => {
-            start::execute(sqs_port, admin_port, metrics_port, backend, db_path).await
+            start::execute(sqs_port, admin_port, metrics_port, bind_address, backend, db_path).await
         }
         Commands::Queue(queue_cmd) => execute_queue_command(queue_cmd).await,
         Commands::Health { admin_url } => execute_health(admin_url).await,

@@ -23,10 +23,10 @@ async fn metrics_handler() -> Response {
 }
 
 /// Start the metrics HTTP server
-pub async fn start_metrics_server(port: u16, shutdown_rx: broadcast::Receiver<()>) -> anyhow::Result<()> {
+pub async fn start_metrics_server(bind_address: String, port: u16, shutdown_rx: broadcast::Receiver<()>) -> anyhow::Result<()> {
     let app = Router::new().route("/metrics", get(metrics_handler));
 
-    let addr = format!("127.0.0.1:{}", port);
+    let addr = format!("{}:{}", bind_address, port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     info!("Metrics server listening on {}", addr);

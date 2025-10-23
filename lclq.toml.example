@@ -1,0 +1,58 @@
+# lclq Configuration File
+# This is an example configuration file for lclq.
+# All settings shown here are optional - lclq will use sensible defaults if not specified.
+
+[server]
+# Port for AWS SQS HTTP API (default: 9324)
+sqs_port = 9324
+
+# Port for GCP Pub/Sub gRPC API (default: 8085)
+pubsub_grpc_port = 8085
+
+# Port for GCP Pub/Sub HTTP/REST API (default: 8086)
+pubsub_http_port = 8086
+
+# Port for Admin API (default: 9000)
+admin_port = 9000
+
+# Bind address for all servers (default: "127.0.0.1")
+# Use "0.0.0.0" to bind to all interfaces (required for Docker)
+bind_address = "0.0.0.0"
+
+[storage]
+# Storage backend configuration
+# Choose either InMemory or Sqlite
+
+# Option 1: In-Memory Backend (fast, no persistence)
+[storage.backend]
+type = "InMemory"
+max_messages = 100000
+eviction_policy = "Lru"  # Options: "Lru", "Fifo", "RejectNew"
+
+# Option 2: SQLite Backend (persistent, ACID guarantees)
+# [storage.backend]
+# type = "Sqlite"
+# database_path = "/data/lclq.db"  # Use /data/lclq.db in Docker
+
+[sqs]
+# Enable AWS Signature V4 verification (default: false)
+# Set to true to require valid AWS signatures
+enable_signature_verification = false
+
+[pubsub]
+# Default GCP project ID for Pub/Sub (default: "local-project")
+default_project_id = "local-project"
+
+[logging]
+# Log level: "trace", "debug", "info", "warn", "error" (default: "info")
+level = "info"
+
+# Log format: "text" or "json" (default: "text")
+format = "text"
+
+[metrics]
+# Enable Prometheus metrics endpoint (default: true)
+enabled = true
+
+# Port for Prometheus metrics (default: 9090)
+port = 9090

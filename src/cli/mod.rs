@@ -33,6 +33,10 @@ pub enum Commands {
         #[arg(long, env = "LCLQ_METRICS_PORT", default_value = "9090")]
         metrics_port: u16,
 
+        /// Bind address (use 0.0.0.0 for all interfaces)
+        #[arg(long, env = "LCLQ_BIND_ADDRESS", default_value = "127.0.0.1")]
+        bind_address: String,
+
         /// Storage backend (memory | sqlite)
         #[arg(long, env = "LCLQ_BACKEND", default_value = "memory")]
         backend: String,

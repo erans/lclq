@@ -20,6 +20,7 @@ pub async fn execute(
     sqs_port: u16,
     admin_port: u16,
     metrics_port: u16,
+    bind_address: String,
     backend: String,
     db_path: String,
 ) -> Result<()> {
@@ -31,11 +32,13 @@ pub async fn execute(
     // Override configuration with CLI arguments
     config.server.sqs_port = sqs_port;
     config.server.admin_port = admin_port;
+    config.server.bind_address = bind_address.clone();
 
     info!("Configuration loaded successfully");
     info!("SQS port: {}", config.server.sqs_port);
     info!("Admin port: {}", config.server.admin_port);
     info!("Metrics port: {}", metrics_port);
+    info!("Bind address: {}", config.server.bind_address);
 
     // Create shutdown signal for coordinating graceful shutdown
     let shutdown_signal = ShutdownSignal::new();
@@ -80,16 +83,18 @@ pub async fn execute(
 
     // Start Admin API server in background
     let admin_shutdown_rx = shutdown_signal.subscribe();
+    let admin_bind_address = bind_address.clone();
     let admin_handle = tokio::spawn(async move {
-        if let Err(e) = start_admin_server(admin_backend, admin_port, admin_shutdown_rx).await {
+        if let Err(e) = start_admin_server(admin_backend, admin_bind_address, admin_port, admin_shutdown_rx).await {
             tracing::error!("Admin API server error: {}", e);
         }
     });
 
     // Start Metrics server in background
     let metrics_shutdown_rx = shutdown_signal.subscribe();
+    let metrics_bind_address = bind_address.clone();
     let metrics_handle = tokio::spawn(async move {
-        if let Err(e) = start_metrics_server(metrics_port, metrics_shutdown_rx).await {
+        if let Err(e) = start_metrics_server(metrics_bind_address, metrics_port, metrics_shutdown_rx).await {
             tracing::error!("Metrics server error: {}", e);
         }
     });

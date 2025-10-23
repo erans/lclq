@@ -1,7 +1,7 @@
 # lclq Implementation TODO
 
 **Status:** Ready for Implementation
-**Last Updated:** October 2025 (Phase 6 Management & Operations - COMPLETE ✅)
+**Last Updated:** October 2025 (Phase 7.4 Docker & Container Support - COMPLETE ✅)
 
 This document tracks all implementation tasks for lclq based on the PRD and Technical PRD.
 
@@ -706,22 +706,26 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Prevent injection attacks (SQL injection fixed)
   - [ ] Limit request sizes
 
-### 7.4 Docker and Container Support
-- [ ] Create Dockerfile
-  - [ ] Multi-stage build
-  - [ ] Minimal base image (debian:bookworm-slim)
-  - [ ] Copy binary from builder
-  - [ ] Expose all ports
-  - [ ] Set up ENTRYPOINT and CMD
-- [ ] Create docker-compose.yml
-  - [ ] Service definition
-  - [ ] Port mappings
-  - [ ] Volume mounts
-  - [ ] Environment variables
-- [ ] Test Docker image
-  - [ ] Build and run
-  - [ ] Test all endpoints
-  - [ ] Verify persistence with volumes
+### 7.4 Docker and Container Support ✅ COMPLETE
+- [x] Create Dockerfile
+  - [x] Multi-stage build
+  - [x] Minimal base image (debian:bookworm-slim)
+  - [x] Copy binary from builder
+  - [x] Expose all ports
+  - [x] Set up ENTRYPOINT and CMD
+- [x] Create docker-compose.yml
+  - [x] Service definition
+  - [x] Port mappings
+  - [x] Volume mounts
+  - [x] Environment variables
+- [x] Create .dockerignore for optimized build context
+- [x] Create lclq.toml.example configuration file
+- [x] Add bind-address CLI argument and environment variable support
+- [x] Update all servers to accept bind_address parameter
+- [x] Test Docker image
+  - [x] Build and run
+  - [x] Test all endpoints (SQS, Admin API, Metrics)
+  - [x] Verify persistence with volumes (SQLite backend)
 
 ### 7.5 Release Preparation
 - [ ] Version tagging and releases
