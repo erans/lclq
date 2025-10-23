@@ -21,6 +21,10 @@ coverage/
 *.gcno
 *.gcda
 
+# Node.js/npm
+node_modules/
+package-lock.json
+
 # Benchmarking
 flamegraph.svg
 perf.data

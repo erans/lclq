@@ -1433,6 +1433,60 @@ fn xml_to_json_response(xml: &str) -> String {
                     message.insert("Attributes".to_string(), json!(attributes));
                 }
 
+                // Extract MessageAttributes
+                let mut message_attributes = serde_json::Map::new();
+                let mut msg_attr_pos = 0;
+                while let Some(msg_attr_start) = msg_xml[msg_attr_pos..].find("<MessageAttribute>") {
+                    let abs_msg_attr_start = msg_attr_pos + msg_attr_start;
+                    if let Some(msg_attr_end_rel) = msg_xml[abs_msg_attr_start..].find("</MessageAttribute>") {
+                        let msg_attr_xml = &msg_xml[abs_msg_attr_start..abs_msg_attr_start + msg_attr_end_rel + 19];
+
+                        // Extract Name
+                        if let Some(name_start) = msg_attr_xml.find("<Name>") {
+                            if let Some(name_end) = msg_attr_xml.find("</Name>") {
+                                let name = &msg_attr_xml[name_start + 6..name_end];
+
+                                // Extract Value object
+                                let mut value_obj = serde_json::Map::new();
+
+                                // Extract DataType
+                                if let Some(dt_start) = msg_attr_xml.find("<DataType>") {
+                                    if let Some(dt_end) = msg_attr_xml.find("</DataType>") {
+                                        let data_type = &msg_attr_xml[dt_start + 10..dt_end];
+                                        value_obj.insert("DataType".to_string(), json!(data_type));
+                                    }
+                                }
+
+                                // Extract StringValue
+                                if let Some(sv_start) = msg_attr_xml.find("<StringValue>") {
+                                    if let Some(sv_end) = msg_attr_xml.find("</StringValue>") {
+                                        let string_value = &msg_attr_xml[sv_start + 13..sv_end];
+                                        value_obj.insert("StringValue".to_string(), json!(string_value));
+                                    }
+                                }
+
+                                // Extract BinaryValue
+                                if let Some(bv_start) = msg_attr_xml.find("<BinaryValue>") {
+                                    if let Some(bv_end) = msg_attr_xml.find("</BinaryValue>") {
+                                        let binary_value = &msg_attr_xml[bv_start + 13..bv_end];
+                                        value_obj.insert("BinaryValue".to_string(), json!(binary_value));
+                                    }
+                                }
+
+                                message_attributes.insert(name.to_string(), json!(value_obj));
+                            }
+                        }
+
+                        msg_attr_pos = abs_msg_attr_start + msg_attr_end_rel + 19;
+                    } else {
+                        break;
+                    }
+                }
+
+                if !message_attributes.is_empty() {
+                    message.insert("MessageAttributes".to_string(), json!(message_attributes));
+                }
+
                 messages.push(message);
                 pos = abs_start + msg_end_rel + 10;
             } else {
@@ -1441,6 +1495,108 @@ fn xml_to_json_response(xml: &str) -> String {
         }
 
         return json!({"Messages": messages}).to_string();
+    }
+
+    // For SendMessageBatch - collect successful and failed entries
+    if xml.contains("SendMessageBatchResponse") || xml.contains("SendMessageBatchResult") {
+        let mut successful = Vec::new();
+        let mut failed = Vec::new();
+        let mut pos = 0;
+
+        // Extract successful entries
+        while let Some(entry_start) = xml[pos..].find("<SendMessageBatchResultEntry>") {
+            let abs_start = pos + entry_start;
+            if let Some(entry_end_rel) = xml[abs_start..].find("</SendMessageBatchResultEntry>") {
+                let entry_xml = &xml[abs_start..abs_start + entry_end_rel + 30];
+                let mut entry = serde_json::Map::new();
+
+                // Extract Id
+                if let Some(id_start) = entry_xml.find("<Id>") {
+                    if let Some(id_end) = entry_xml.find("</Id>") {
+                        let id = &entry_xml[id_start + 4..id_end];
+                        entry.insert("Id".to_string(), json!(id));
+                    }
+                }
+
+                // Extract MessageId
+                if let Some(mid_start) = entry_xml.find("<MessageId>") {
+                    if let Some(mid_end) = entry_xml.find("</MessageId>") {
+                        let message_id = &entry_xml[mid_start + 11..mid_end];
+                        entry.insert("MessageId".to_string(), json!(message_id));
+                    }
+                }
+
+                // Extract MD5OfMessageBody
+                if let Some(md5_start) = entry_xml.find("<MD5OfMessageBody>") {
+                    if let Some(md5_end) = entry_xml.find("</MD5OfMessageBody>") {
+                        let md5 = &entry_xml[md5_start + 18..md5_end];
+                        entry.insert("MD5OfMessageBody".to_string(), json!(md5));
+                    }
+                }
+
+                successful.push(json!(entry));
+                pos = abs_start + entry_end_rel + 30;
+            } else {
+                break;
+            }
+        }
+
+        // Extract failed entries
+        pos = 0;
+        while let Some(entry_start) = xml[pos..].find("<BatchResultErrorEntry>") {
+            let abs_start = pos + entry_start;
+            if let Some(entry_end_rel) = xml[abs_start..].find("</BatchResultErrorEntry>") {
+                let entry_xml = &xml[abs_start..abs_start + entry_end_rel + 24];
+                let mut entry = serde_json::Map::new();
+
+                // Extract Id
+                if let Some(id_start) = entry_xml.find("<Id>") {
+                    if let Some(id_end) = entry_xml.find("</Id>") {
+                        let id = &entry_xml[id_start + 4..id_end];
+                        entry.insert("Id".to_string(), json!(id));
+                    }
+                }
+
+                // Extract Code
+                if let Some(code_start) = entry_xml.find("<Code>") {
+                    if let Some(code_end) = entry_xml.find("</Code>") {
+                        let code = &entry_xml[code_start + 6..code_end];
+                        entry.insert("Code".to_string(), json!(code));
+                    }
+                }
+
+                // Extract Message
+                if let Some(msg_start) = entry_xml.find("<Message>") {
+                    if let Some(msg_end) = entry_xml.find("</Message>") {
+                        let message = &entry_xml[msg_start + 9..msg_end];
+                        entry.insert("Message".to_string(), json!(message));
+                    }
+                }
+
+                // Extract SenderFault
+                if let Some(sf_start) = entry_xml.find("<SenderFault>") {
+                    if let Some(sf_end) = entry_xml.find("</SenderFault>") {
+                        let sender_fault = &entry_xml[sf_start + 13..sf_end];
+                        entry.insert("SenderFault".to_string(), json!(sender_fault == "true"));
+                    }
+                }
+
+                failed.push(json!(entry));
+                pos = abs_start + entry_end_rel + 24;
+            } else {
+                break;
+            }
+        }
+
+        let mut result = serde_json::Map::new();
+        if !successful.is_empty() {
+            result.insert("Successful".to_string(), json!(successful));
+        }
+        if !failed.is_empty() {
+            result.insert("Failed".to_string(), json!(failed));
+        }
+
+        return serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string());
     }
 
     // For ListQueues - collect all QueueUrl elements into an array

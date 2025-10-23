@@ -85,6 +85,50 @@ impl SqsRequest {
                     }
                 }
 
+                // Handle MessageAttributes - expand into numbered parameters
+                // MessageAttributes: {Author: {DataType: "String", StringValue: "SDK"}, ...}
+                // becomes:
+                // MessageAttribute.1.Name=Author
+                // MessageAttribute.1.Value.DataType=String
+                // MessageAttribute.1.Value.StringValue=SDK
+                if key == "MessageAttributes" {
+                    if let Value::Object(attrs) = value {
+                        let mut index = 1;
+                        for (attr_name, attr_value) in attrs {
+                            params.insert(format!("MessageAttribute.{}.Name", index), attr_name.clone());
+
+                            if let Value::Object(attr_obj) = attr_value {
+                                // Extract DataType
+                                if let Some(Value::String(data_type)) = attr_obj.get("DataType") {
+                                    params.insert(
+                                        format!("MessageAttribute.{}.Value.DataType", index),
+                                        data_type.clone()
+                                    );
+                                }
+
+                                // Extract StringValue if present
+                                if let Some(Value::String(string_value)) = attr_obj.get("StringValue") {
+                                    params.insert(
+                                        format!("MessageAttribute.{}.Value.StringValue", index),
+                                        string_value.clone()
+                                    );
+                                }
+
+                                // Extract BinaryValue if present
+                                if let Some(Value::String(binary_value)) = attr_obj.get("BinaryValue") {
+                                    params.insert(
+                                        format!("MessageAttribute.{}.Value.BinaryValue", index),
+                                        binary_value.clone()
+                                    );
+                                }
+                            }
+
+                            index += 1;
+                        }
+                        continue; // Don't add MessageAttributes itself
+                    }
+                }
+
                 // Convert JSON value to string or expand arrays
                 match value {
                     Value::String(s) => {
@@ -97,22 +141,29 @@ impl SqsRequest {
                         params.insert(key.clone(), b.to_string());
                     }
                     Value::Array(arr) => {
-                        // Expand arrays into numbered parameters
-                        // e.g., AttributeNames: ["All", "Policy"] becomes:
-                        // AttributeName.1 = All, AttributeName.2 = Policy
-                        let singular_key = if key.ends_with("s") {
-                            &key[..key.len()-1]  // Remove trailing 's'
+                        // Keep "Entries" as JSON string for batch operations
+                        if key == "Entries" {
+                            let value_str = serde_json::to_string(value)
+                                .unwrap_or_else(|_| "[]".to_string());
+                            params.insert(key.clone(), value_str);
                         } else {
-                            key.as_str()
-                        };
-
-                        for (i, item) in arr.iter().enumerate() {
-                            let numbered_key = format!("{}.{}", singular_key, i + 1);
-                            let item_str = match item {
-                                Value::String(s) => s.clone(),
-                                _ => item.to_string(),
+                            // Expand other arrays into numbered parameters
+                            // e.g., AttributeNames: ["All", "Policy"] becomes:
+                            // AttributeName.1 = All, AttributeName.2 = Policy
+                            let singular_key = if key.ends_with("s") {
+                                &key[..key.len()-1]  // Remove trailing 's'
+                            } else {
+                                key.as_str()
                             };
-                            params.insert(numbered_key, item_str);
+
+                            for (i, item) in arr.iter().enumerate() {
+                                let numbered_key = format!("{}.{}", singular_key, i + 1);
+                                let item_str = match item {
+                                    Value::String(s) => s.clone(),
+                                    _ => item.to_string(),
+                                };
+                                params.insert(numbered_key, item_str);
+                            }
                         }
                     }
                     Value::Object(_) => {
