@@ -1,4 +1,9 @@
+use std::sync::Arc;
+
 use lclq::config::LclqConfig;
+use lclq::sqs::start_sqs_server;
+use lclq::storage::memory::InMemoryBackend;
+use lclq::storage::StorageBackend;
 use tracing::info;
 
 #[tokio::main]
@@ -20,8 +25,13 @@ async fn main() -> anyhow::Result<()> {
     info!("Pub/Sub HTTP port: {}", config.server.pubsub_http_port);
     info!("Admin port: {}", config.server.admin_port);
 
-    // TODO: Start servers
-    info!("lclq is ready!");
+    // Create storage backend
+    let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());
+    info!("In-memory storage backend initialized");
+
+    // Start SQS server
+    info!("Starting SQS HTTP server...");
+    start_sqs_server(backend, config).await?;
 
     Ok(())
 }
