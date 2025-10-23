@@ -1,3 +1,4 @@
 //! HTTP and gRPC server implementations.
 
-// TODO: Implement servers
+/// Admin HTTP API server
+pub mod admin;

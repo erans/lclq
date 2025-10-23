@@ -6,6 +6,7 @@ use tracing::info;
 
 use crate::config::LclqConfig;
 use crate::core::cleanup::CleanupManager;
+use crate::server::admin::start_admin_server;
 use crate::sqs::start_sqs_server;
 use crate::storage::memory::InMemoryBackend;
 use crate::storage::sqlite::{SqliteBackend, SqliteConfig};
@@ -68,12 +69,24 @@ pub async fn execute(
         "Storage backend initialized"
     );
 
-    // TODO: Start Admin API server on admin_port
+    // Clone backend for admin server
+    let admin_backend = storage_backend.clone();
+
+    // Start Admin API server in background
+    let admin_handle = tokio::spawn(async move {
+        if let Err(e) = start_admin_server(admin_backend, admin_port).await {
+            tracing::error!("Admin API server error: {}", e);
+        }
+    });
+
     // TODO: Start Metrics server on metrics_port
 
-    // Start SQS server
+    // Start SQS server (blocks until server stops)
     info!("Starting SQS HTTP server on port {}...", sqs_port);
-    start_sqs_server(storage_backend, config).await?;
+    let sqs_result = start_sqs_server(storage_backend, config).await;
 
-    Ok(())
+    // If SQS server stops, abort admin server
+    admin_handle.abort();
+
+    sqs_result
 }
