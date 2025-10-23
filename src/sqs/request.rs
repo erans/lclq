@@ -344,6 +344,56 @@ impl SqsRequest {
 
         entries
     }
+
+    /// Parse batch entries for DeleteMessageBatch.
+    pub fn parse_delete_message_batch_entries(&self) -> Vec<DeleteMessageBatchEntry> {
+        let mut entries = Vec::new();
+
+        // For JSON requests, Entries is a JSON array string
+        if let Some(entries_json) = self.get_param("Entries") {
+            // Try to parse as JSON array
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(entries_json) {
+                if let Some(arr) = json_value.as_array() {
+                    for entry in arr {
+                        if let (Some(id), Some(receipt_handle)) = (
+                            entry["Id"].as_str(),
+                            entry["ReceiptHandle"].as_str(),
+                        ) {
+                            entries.push(DeleteMessageBatchEntry {
+                                id: id.to_string(),
+                                receipt_handle: receipt_handle.to_string(),
+                            });
+                        }
+                    }
+                    return entries;
+                }
+            }
+        }
+
+        // For form-encoded requests, batch entries are encoded as:
+        // DeleteMessageBatchRequestEntry.1.Id=msg1
+        // DeleteMessageBatchRequestEntry.1.ReceiptHandle=handle1
+        // ...
+
+        let mut index = 1;
+        loop {
+            let id_key = format!("DeleteMessageBatchRequestEntry.{}.Id", index);
+            let handle_key = format!("DeleteMessageBatchRequestEntry.{}.ReceiptHandle", index);
+
+            if let (Some(id), Some(handle)) = (self.get_param(&id_key), self.get_param(&handle_key)) {
+                entries.push(DeleteMessageBatchEntry {
+                    id: id.to_string(),
+                    receipt_handle: handle.to_string(),
+                });
+
+                index += 1;
+            } else {
+                break;
+            }
+        }
+
+        entries
+    }
 }
 
 /// Batch entry for SendMessageBatch.
@@ -359,6 +409,15 @@ pub struct SendMessageBatchEntry {
     pub message_deduplication_id: Option<String>,
     /// Message group ID (FIFO).
     pub message_group_id: Option<String>,
+}
+
+/// Batch entry for DeleteMessageBatch.
+#[derive(Debug, Clone)]
+pub struct DeleteMessageBatchEntry {
+    /// Entry ID.
+    pub id: String,
+    /// Receipt handle.
+    pub receipt_handle: String,
 }
 
 /// Parse form-encoded data into a HashMap.

@@ -8,9 +8,9 @@ use tracing::{debug, info};
 
 use crate::config::LclqConfig;
 use crate::sqs::{
-    build_create_queue_response, build_delete_message_response, build_error_response,
-    build_get_queue_attributes_response, build_get_queue_url_response,
-    build_list_queues_response, build_receive_message_response,
+    build_create_queue_response, build_delete_message_batch_response,
+    build_delete_message_response, build_error_response, build_get_queue_attributes_response,
+    build_get_queue_url_response, build_list_queues_response, build_receive_message_response,
     build_send_message_batch_response, build_send_message_response,
     calculate_md5_of_attributes, calculate_md5_of_body, extract_queue_name_from_url,
     BatchErrorEntry, BatchResultEntry, MessageAttributeInfo, ReceivedMessageInfo, SqsAction,
@@ -55,6 +55,7 @@ impl SqsHandler {
             SqsAction::SendMessageBatch => self.handle_send_message_batch(request).await,
             SqsAction::ReceiveMessage => self.handle_receive_message(request).await,
             SqsAction::DeleteMessage => self.handle_delete_message(request).await,
+            SqsAction::DeleteMessageBatch => self.handle_delete_message_batch(request).await,
             SqsAction::PurgeQueue => self.handle_purge_queue(request).await,
             SqsAction::GetQueueAttributes => self.handle_get_queue_attributes(request).await,
             SqsAction::SetQueueAttributes => self.handle_set_queue_attributes(request).await,
@@ -548,6 +549,72 @@ impl SqsHandler {
                 "Receipt handle is invalid",
             ),
         }
+    }
+
+    /// Handle DeleteMessageBatch action.
+    async fn handle_delete_message_batch(&self, request: SqsRequest) -> String {
+        let queue_url = match request.get_required_param("QueueUrl") {
+            Ok(url) => url,
+            Err(e) => return build_error_response(SqsErrorCode::MissingParameter, &e),
+        };
+
+        let queue_name = match extract_queue_name_from_url(queue_url) {
+            Some(name) => name,
+            None => {
+                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+            }
+        };
+
+        // Parse batch entries
+        let entries = request.parse_delete_message_batch_entries();
+
+        if entries.is_empty() {
+            return build_error_response(
+                SqsErrorCode::InvalidParameterValue,
+                "No batch entries provided",
+            );
+        }
+
+        if entries.len() > 10 {
+            return build_error_response(
+                SqsErrorCode::InvalidParameterValue,
+                "Maximum 10 batch entries allowed",
+            );
+        }
+
+        let mut successful_ids = Vec::new();
+        let mut failed_entries = Vec::new();
+
+        // Process each entry
+        for entry in entries {
+            match self.backend.delete_message(&queue_name, &entry.receipt_handle).await {
+                Ok(_) => {
+                    successful_ids.push(entry.id.clone());
+                    debug!(
+                        queue_name = %queue_name,
+                        entry_id = %entry.id,
+                        "Batch message deleted"
+                    );
+                }
+                Err(e) => {
+                    failed_entries.push(BatchErrorEntry {
+                        id: entry.id.clone(),
+                        code: "ReceiptHandleIsInvalid".to_string(),
+                        message: e.to_string(),
+                        sender_fault: true,
+                    });
+                }
+            }
+        }
+
+        info!(
+            queue_name = %queue_name,
+            successful = successful_ids.len(),
+            failed = failed_entries.len(),
+            "Batch messages deleted"
+        );
+
+        build_delete_message_batch_response(&successful_ids, &failed_entries)
     }
 
     /// Handle PurgeQueue action.
