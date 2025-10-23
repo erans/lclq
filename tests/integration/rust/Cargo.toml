@@ -1,0 +1,9 @@
+[package]
+name = "lclq-rust-integration-tests"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+aws-config = "1.5"
+aws-sdk-sqs = "1.50"

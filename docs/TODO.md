@@ -293,8 +293,8 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Poetry-based project setup
   - [x] 10 comprehensive test functions
   - [x] Test with AWS SDK for JavaScript v3
-  - [ ] Test with AWS SDK for Go v2
-  - [ ] Test with AWS SDK for Rust
+  - [x] Test with AWS SDK for Go v2
+  - [x] Test with AWS SDK for Rust
 - [x] Test scenarios (boto3) - **7/7 advanced tests passing**
   - [x] Create queue and send/receive messages
   - [x] FIFO queue ordering
@@ -313,6 +313,22 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Delay queues - queue-level and per-message delays
   - [x] Queue attributes - GetQueueAttributes and SetQueueAttributes
 - [x] Test scenarios (JavaScript SDK v3) - **7/7 tests passing**
+  - [x] Basic Queue Operations - create, send, receive, delete
+  - [x] Message Attributes - send and receive with custom attributes
+  - [x] FIFO Queue - ordering verification
+  - [x] Batch Operations - SendMessageBatch, DeleteMessageBatch
+  - [x] Queue Attributes - GetQueueAttributes, SetQueueAttributes
+  - [x] Change Message Visibility - single and batch operations
+  - [x] Delay Queue - queue-level delays with timing verification
+- [x] Test scenarios (Go SDK v2) - **7/7 tests passing**
+  - [x] Basic Queue Operations - create, send, receive, delete
+  - [x] Message Attributes - send and receive with custom attributes
+  - [x] FIFO Queue - ordering verification
+  - [x] Batch Operations - SendMessageBatch, DeleteMessageBatch
+  - [x] Queue Attributes - GetQueueAttributes, SetQueueAttributes
+  - [x] Change Message Visibility - single and batch operations
+  - [x] Delay Queue - queue-level delays with timing verification
+- [x] Test scenarios (Rust SDK) - **7/7 tests passing**
   - [x] Basic Queue Operations - create, send, receive, delete
   - [x] Message Attributes - send and receive with custom attributes
   - [x] FIFO Queue - ordering verification
@@ -1024,11 +1040,12 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [ ] Message filtering
   - [ ] Push subscriptions
 - [ ] SDK compatibility
-  - [ ] Python (boto3, google-cloud-python) ✓
-  - [ ] JavaScript (AWS SDK v3, @google-cloud/pubsub) ✓
-  - [ ] Go (AWS SDK v2, cloud.google.com/go/pubsub) ✓
-  - [ ] Ruby (AWS SDK v3, google-cloud-pubsub) ✓
-  - [ ] Java (AWS SDK v2, google-cloud-pubsub) ✓
+  - [x] Python (boto3, google-cloud-python) ✓
+  - [x] JavaScript (AWS SDK v3, @google-cloud/pubsub) ✓
+  - [x] Go (AWS SDK v2, cloud.google.com/go/pubsub) ✓
+  - [x] Rust (AWS SDK) ✓
+  - [ ] Ruby (AWS SDK v3, google-cloud-pubsub)
+  - [ ] Java (AWS SDK v2, google-cloud-pubsub)
 - [ ] Both protocols work for Pub/Sub
   - [ ] gRPC fully functional ✓
   - [ ] HTTP/REST fully functional ✓
