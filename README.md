@@ -30,6 +30,7 @@ lclq start
 That's it! Server starts in <100ms with:
 - **AWS SQS** HTTP API → `http://localhost:9324`
 - **GCP Pub/Sub** gRPC API → `localhost:8085`
+- **GCP Pub/Sub** REST API → `http://localhost:8086`
 - **Admin API** → `http://localhost:9000`
 - **Metrics** → `http://localhost:9090/metrics`
 
@@ -182,6 +183,7 @@ services:
     ports:
       - "9324:9324"  # SQS
       - "8085:8085"  # Pub/Sub gRPC
+      - "8086:8086"  # Pub/Sub REST
       - "9000:9000"  # Admin API
 
   app:
@@ -219,8 +221,13 @@ Fully compatible with official AWS SDKs (Python, JavaScript, Go, Rust, Java, Rub
 
 ### GCP Pub/Sub Compatibility ✅
 
-Fully compatible with official Google Cloud SDKs via gRPC protocol.
+Fully compatible with official Google Cloud SDKs via both gRPC and HTTP/REST protocols.
 
+**Protocols Supported:**
+- ✅ **gRPC API** - Full bidirectional streaming support
+- ✅ **HTTP/REST API** - Complete REST endpoints for web clients
+
+**Features:**
 - ✅ Topics and subscriptions
 - ✅ Message publishing with attributes
 - ✅ Message ordering with ordering keys
@@ -231,11 +238,11 @@ Fully compatible with official Google Cloud SDKs via gRPC protocol.
 - ✅ Subscription filtering (basic)
 - 🚧 StreamingPull (bidirectional streaming - stub)
 - 🚧 Push subscriptions (planned)
-- 🚧 HTTP/REST protocol (planned)
 
-**Tested with 31/31 tests passing across 2 SDKs:**
-- Python (google-cloud-pubsub) - 15/15 tests ✓
-- JavaScript (@google-cloud/pubsub) - 16/16 tests ✓
+**Tested with 40/40 tests passing across 2 SDKs and 2 protocols:**
+- Python gRPC (google-cloud-pubsub) - 15/15 tests ✓
+- Python REST (google-cloud-pubsub with REST transport) - 9/9 tests ✓
+- JavaScript gRPC (@google-cloud/pubsub) - 16/16 tests ✓
 
 ### Storage Backends
 
@@ -292,10 +299,10 @@ chmod +x lclq
 
 ```bash
 # Run with in-memory storage
-docker run -p 9324:9324 -p 8085:8085 -p 9000:9000 lclq/lclq:latest
+docker run -p 9324:9324 -p 8085:8085 -p 8086:8086 -p 9000:9000 lclq/lclq:latest
 
 # Run with persistent SQLite storage
-docker run -p 9324:9324 -p 8085:8085 -p 9000:9000 \
+docker run -p 9324:9324 -p 8085:8085 -p 8086:8086 -p 9000:9000 \
   -v $(pwd)/data:/data \
   lclq/lclq:latest --storage-type sqlite --sqlite-path /data/lclq.db
 ```
@@ -375,7 +382,7 @@ lclq stats                         # System statistics
 | Phase 2 | ✅ Complete | AWS SQS implementation (all actions) |
 | Phase 3 | ✅ Complete | SQLite backend with migrations |
 | Phase 4 | ✅ Complete | GCP Pub/Sub gRPC (core features) |
-| Phase 5 | 🚧 Planned | GCP Pub/Sub HTTP/REST protocol |
+| Phase 5 | ✅ Complete | GCP Pub/Sub HTTP/REST protocol |
 | Phase 6 | ✅ Complete | Management & operations (CLI, Admin API) |
 | Phase 7 | ✅ Complete | Performance & polish (benchmarks, Docker) |
 
