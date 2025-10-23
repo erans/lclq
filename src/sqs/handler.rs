@@ -1400,6 +1400,39 @@ fn xml_to_json_response(xml: &str) -> String {
                     }
                 }
 
+                // Extract Attributes
+                let mut attributes = serde_json::Map::new();
+                let mut attr_pos = 0;
+                while let Some(attr_start) = msg_xml[attr_pos..].find("<Attribute>") {
+                    let abs_attr_start = attr_pos + attr_start;
+                    if let Some(attr_end_rel) = msg_xml[abs_attr_start..].find("</Attribute>") {
+                        let attr_xml = &msg_xml[abs_attr_start..abs_attr_start + attr_end_rel + 12];
+
+                        // Extract Name
+                        if let Some(name_start) = attr_xml.find("<Name>") {
+                            if let Some(name_end) = attr_xml.find("</Name>") {
+                                let name = &attr_xml[name_start + 6..name_end];
+
+                                // Extract Value
+                                if let Some(value_start) = attr_xml.find("<Value>") {
+                                    if let Some(value_end) = attr_xml.find("</Value>") {
+                                        let value = &attr_xml[value_start + 7..value_end];
+                                        attributes.insert(name.to_string(), json!(value));
+                                    }
+                                }
+                            }
+                        }
+
+                        attr_pos = abs_attr_start + attr_end_rel + 12;
+                    } else {
+                        break;
+                    }
+                }
+
+                if !attributes.is_empty() {
+                    message.insert("Attributes".to_string(), json!(attributes));
+                }
+
                 messages.push(message);
                 pos = abs_start + msg_end_rel + 10;
             } else {
@@ -1448,7 +1481,9 @@ fn xml_to_json_response(xml: &str) -> String {
                         if let Some(value_start) = attr_xml.find("<Value>") {
                             if let Some(value_end) = attr_xml.find("</Value>") {
                                 let value = &attr_xml[value_start + 7..value_end];
-                                attributes.insert(name.to_string(), json!(value));
+                                // Unescape XML entities in the value
+                                let unescaped_value = crate::sqs::unescape_xml(value);
+                                attributes.insert(name.to_string(), json!(unescaped_value));
                             }
                         }
                     }

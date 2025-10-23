@@ -85,16 +85,45 @@ impl SqsRequest {
                     }
                 }
 
-                // Convert JSON value to string
-                let value_str = match value {
-                    Value::String(s) => s.clone(),
-                    Value::Number(n) => n.to_string(),
-                    Value::Bool(b) => b.to_string(),
-                    Value::Object(_) => serde_json::to_string(value)
-                        .map_err(|e| format!("Failed to serialize object: {}", e))?,
-                    _ => value.to_string(),
-                };
-                params.insert(key.clone(), value_str);
+                // Convert JSON value to string or expand arrays
+                match value {
+                    Value::String(s) => {
+                        params.insert(key.clone(), s.clone());
+                    }
+                    Value::Number(n) => {
+                        params.insert(key.clone(), n.to_string());
+                    }
+                    Value::Bool(b) => {
+                        params.insert(key.clone(), b.to_string());
+                    }
+                    Value::Array(arr) => {
+                        // Expand arrays into numbered parameters
+                        // e.g., AttributeNames: ["All", "Policy"] becomes:
+                        // AttributeName.1 = All, AttributeName.2 = Policy
+                        let singular_key = if key.ends_with("s") {
+                            &key[..key.len()-1]  // Remove trailing 's'
+                        } else {
+                            key.as_str()
+                        };
+
+                        for (i, item) in arr.iter().enumerate() {
+                            let numbered_key = format!("{}.{}", singular_key, i + 1);
+                            let item_str = match item {
+                                Value::String(s) => s.clone(),
+                                _ => item.to_string(),
+                            };
+                            params.insert(numbered_key, item_str);
+                        }
+                    }
+                    Value::Object(_) => {
+                        let value_str = serde_json::to_string(value)
+                            .map_err(|e| format!("Failed to serialize object: {}", e))?;
+                        params.insert(key.clone(), value_str);
+                    }
+                    Value::Null => {
+                        // Skip null values
+                    }
+                }
             }
         }
 
@@ -194,6 +223,7 @@ impl SqsRequest {
             "MaximumMessageSize",
             "ReceiveMessageWaitTimeSeconds",
             "RedrivePolicy",
+            "RedriveAllowPolicy",
         ];
 
         for attr_name in &known_attributes {

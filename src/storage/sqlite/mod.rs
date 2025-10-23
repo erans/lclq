@@ -13,7 +13,7 @@ use crate::core::receipt::{generate_receipt_handle, parse_receipt_handle};
 use crate::error::{Error, Result};
 use crate::storage::{ReceivedMessage, StorageBackend};
 use crate::types::{
-    DlqConfig, Message, MessageId, QueueConfig, QueueStats, QueueType, ReceiveOptions,
+    Message, MessageId, QueueConfig, QueueStats, QueueType, ReceiveOptions,
 };
 
 /// SQLite storage backend configuration.

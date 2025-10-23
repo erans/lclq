@@ -390,6 +390,30 @@ impl StorageBackend for InMemoryBackend {
         queue.last_access = Utc::now();
 
         let now = Utc::now();
+
+        // Return expired in-flight messages to available queue
+        let expired_message_ids: Vec<String> = queue
+            .in_flight_messages
+            .iter()
+            .filter(|(_, in_flight)| in_flight.visibility_expires_at <= now)
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        for message_id in expired_message_ids {
+            if let Some(in_flight) = queue.in_flight_messages.remove(&message_id) {
+                debug!(
+                    queue_id = %queue_id,
+                    message_id = %message_id,
+                    "Returning expired in-flight message to available queue"
+                );
+
+                queue.available_messages.push_back(StoredMessage {
+                    message: in_flight.message,
+                    visible_at: now, // Immediately visible
+                });
+            }
+        }
+
         let visibility_timeout = options
             .visibility_timeout
             .unwrap_or(queue.config.visibility_timeout);

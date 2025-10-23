@@ -375,6 +375,16 @@ pub fn escape_xml(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+/// Unescape XML entities.
+pub fn unescape_xml(s: &str) -> String {
+    // Note: Replace &amp; last to avoid double-unescaping
+    s.replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,7 +1,7 @@
 # lclq Implementation TODO
 
 **Status:** Ready for Implementation
-**Last Updated:** October 2025
+**Last Updated:** October 2025 (Phase 2 boto3 integration complete)
 
 This document tracks all implementation tasks for lclq based on the PRD and Technical PRD.
 
@@ -116,6 +116,7 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] `send_message` - Add message to queue
   - [x] `send_messages` - Batch message sending
   - [x] `receive_messages` - Pull messages with visibility timeout
+  - [x] `receive_messages` - Automatic expired message requeuing
   - [x] `delete_message` - Remove message using receipt handle
   - [x] `change_visibility` - Update visibility timeout
 - [x] Implement FIFO support
@@ -213,6 +214,7 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Parse message attributes (both protocols)
   - [x] Parse queue attributes (both protocols)
   - [x] Handle batch operations
+  - [x] JSON array expansion for boto3 compatibility
 - [x] Implement response generation in `src/sqs/response.rs`
   - [x] XML response builder
   - [x] JSON response conversion (for AWS JSON 1.0 protocol)
@@ -220,6 +222,8 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Success response formatting
   - [x] Batch response formatting
   - [x] Include request IDs
+  - [x] XML entity unescaping for JSON responses
+  - [x] Message attributes extraction in ReceiveMessage JSON responses
 
 ### 2.3 SQS Action Implementations
 - [x] Implement queue management actions
@@ -291,7 +295,7 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [ ] Test with AWS SDK for JavaScript v3
   - [ ] Test with AWS SDK for Go v2
   - [ ] Test with AWS SDK for Rust
-- [x] Test scenarios (boto3)
+- [x] Test scenarios (boto3) - **7/7 advanced tests passing**
   - [x] Create queue and send/receive messages
   - [x] FIFO queue ordering
   - [x] Content-based deduplication
@@ -303,9 +307,11 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] DeleteMessageBatch - batch delete operations
   - [x] ChangeMessageVisibility - single message visibility changes
   - [x] ChangeMessageVisibilityBatch - batch visibility changes
-  - [ ] Dead letter queue functionality
-  - [ ] Long polling
-  - [ ] Delay queues with per-message delays
+  - [x] Dead letter queue - receive count tracking and visibility timeout
+  - [x] RedriveAllowPolicy - DLQ access control
+  - [x] Long polling - WaitTimeSeconds support
+  - [x] Delay queues - queue-level and per-message delays
+  - [x] Queue attributes - GetQueueAttributes and SetQueueAttributes
 
 ---
 
