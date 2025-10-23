@@ -30,6 +30,7 @@ async fn test_sqlite_queue_operations() {
         dlq_config: None,
         content_based_deduplication: false,
         tags: std::collections::HashMap::new(),
+        redrive_allow_policy: None,
     };
 
     let created_queue = backend
@@ -94,6 +95,7 @@ async fn test_sqlite_message_operations() {
         dlq_config: None,
         content_based_deduplication: false,
         tags: std::collections::HashMap::new(),
+        redrive_allow_policy: None,
     };
 
     backend
@@ -190,6 +192,7 @@ async fn test_sqlite_fifo_queue() {
         dlq_config: None,
         content_based_deduplication: true,
         tags: std::collections::HashMap::new(),
+        redrive_allow_policy: None,
     };
 
     backend
@@ -265,6 +268,7 @@ async fn test_sqlite_change_visibility() {
         dlq_config: None,
         content_based_deduplication: false,
         tags: std::collections::HashMap::new(),
+        redrive_allow_policy: None,
     };
 
     backend
@@ -348,6 +352,7 @@ async fn test_sqlite_purge_queue() {
         dlq_config: None,
         content_based_deduplication: false,
         tags: std::collections::HashMap::new(),
+        redrive_allow_policy: None,
     };
 
     backend

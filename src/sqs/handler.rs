@@ -158,6 +158,7 @@ impl SqsHandler {
             dlq_config,
             content_based_deduplication,
             tags: std::collections::HashMap::new(),
+            redrive_allow_policy: None,
         };
 
         // Create queue in backend
@@ -968,6 +969,57 @@ impl SqsHandler {
                         }
                     }
                 }
+                "RedriveAllowPolicy" => {
+                    // Parse the redrive allow policy JSON
+                    // Format: {"redrivePermission": "allowAll"} or "denyAll" or
+                    //         {"redrivePermission": "byQueue", "sourceQueueArns": ["arn:..."]}
+                    match serde_json::from_str::<serde_json::Value>(&value) {
+                        Ok(policy) => {
+                            use crate::types::{RedriveAllowPolicy, RedrivePermission};
+
+                            let permission_str = policy["redrivePermission"].as_str();
+
+                            if let Some(perm) = permission_str {
+                                let permission = match perm {
+                                    "allowAll" => RedrivePermission::AllowAll,
+                                    "denyAll" => RedrivePermission::DenyAll,
+                                    "byQueue" => {
+                                        // Extract source queue ARNs
+                                        let source_arns = policy["sourceQueueArns"]
+                                            .as_array()
+                                            .map(|arr| {
+                                                arr.iter()
+                                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                                    .collect::<Vec<String>>()
+                                            })
+                                            .unwrap_or_default();
+
+                                        RedrivePermission::ByQueue { source_queue_arns: source_arns }
+                                    }
+                                    _ => {
+                                        return build_error_response(
+                                            SqsErrorCode::InvalidParameterValue,
+                                            "Invalid redrivePermission value (must be allowAll, denyAll, or byQueue)",
+                                        );
+                                    }
+                                };
+
+                                queue_config.redrive_allow_policy = Some(RedriveAllowPolicy { permission });
+                            } else {
+                                return build_error_response(
+                                    SqsErrorCode::InvalidParameterValue,
+                                    "Missing redrivePermission in RedriveAllowPolicy",
+                                );
+                            }
+                        }
+                        Err(_) => {
+                            return build_error_response(
+                                SqsErrorCode::InvalidParameterValue,
+                                "Invalid RedriveAllowPolicy JSON",
+                            )
+                        }
+                    }
+                }
                 "FifoQueue" => {
                     // FifoQueue cannot be changed after queue creation
                     return build_error_response(
@@ -1166,6 +1218,10 @@ impl SqsHandler {
                 if queue_config.dlq_config.is_some() {
                     Self::add_queue_attribute(attributes, &QueueAttribute::RedrivePolicy, queue_config, stats, false);
                 }
+
+                if queue_config.redrive_allow_policy.is_some() {
+                    Self::add_queue_attribute(attributes, &QueueAttribute::RedriveAllowPolicy, queue_config, stats, false);
+                }
             }
             QueueAttribute::VisibilityTimeout => {
                 attributes.push(("VisibilityTimeout".to_string(), queue_config.visibility_timeout.to_string()));
@@ -1209,6 +1265,35 @@ impl SqsHandler {
                         dlq.target_queue_id, dlq.max_receive_count
                     );
                     attributes.push(("RedrivePolicy".to_string(), policy));
+                }
+            }
+            QueueAttribute::RedriveAllowPolicy => {
+                if let Some(policy) = &queue_config.redrive_allow_policy {
+                    use crate::types::RedrivePermission;
+
+                    // Format as JSON based on permission type
+                    let json = match &policy.permission {
+                        RedrivePermission::AllowAll => {
+                            r#"{"redrivePermission":"allowAll"}"#.to_string()
+                        }
+                        RedrivePermission::DenyAll => {
+                            r#"{"redrivePermission":"denyAll"}"#.to_string()
+                        }
+                        RedrivePermission::ByQueue { source_queue_arns } => {
+                            // Build sourceQueueArns array
+                            let arns_json: Vec<String> = source_queue_arns
+                                .iter()
+                                .map(|arn| format!(r#""{}""#, arn))
+                                .collect();
+
+                            format!(
+                                r#"{{"redrivePermission":"byQueue","sourceQueueArns":[{}]}}"#,
+                                arns_json.join(",")
+                            )
+                        }
+                    };
+
+                    attributes.push(("RedriveAllowPolicy".to_string(), json));
                 }
             }
             QueueAttribute::CreatedTimestamp | QueueAttribute::LastModifiedTimestamp => {

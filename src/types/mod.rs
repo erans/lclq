@@ -108,6 +108,8 @@ pub struct QueueConfig {
     pub content_based_deduplication: bool,
     /// Tags.
     pub tags: HashMap<String, String>,
+    /// Redrive allow policy - controls which queues can use this as a DLQ.
+    pub redrive_allow_policy: Option<RedriveAllowPolicy>,
 }
 
 /// Dead letter queue configuration.
@@ -117,6 +119,28 @@ pub struct DlqConfig {
     pub target_queue_id: String,
     /// Maximum receive count before moving to DLQ.
     pub max_receive_count: u32,
+}
+
+/// Redrive permission type for dead letter queue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RedrivePermission {
+    /// Allow all source queues to use this queue as DLQ.
+    AllowAll,
+    /// Deny all source queues from using this queue as DLQ.
+    DenyAll,
+    /// Allow only specified source queues to use this queue as DLQ.
+    ByQueue {
+        /// List of source queue ARNs allowed to use this as DLQ.
+        source_queue_arns: Vec<String>,
+    },
+}
+
+/// Redrive allow policy - controls which source queues can use this queue as a DLQ.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedriveAllowPolicy {
+    /// The permission type.
+    pub permission: RedrivePermission,
 }
 
 /// Options for receiving messages.

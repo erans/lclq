@@ -253,7 +253,7 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Redrive policy parsing
   - [x] Max receive count tracking
   - [x] Automatic message movement to DLQ
-  - [ ] Redrive allow policy
+  - [x] Redrive allow policy
 - [x] Implement long polling
   - [x] WaitTimeSeconds parameter support
   - [x] Block until message available (up to 20 seconds)

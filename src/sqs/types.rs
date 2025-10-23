@@ -140,6 +140,8 @@ pub enum QueueAttribute {
     DelaySeconds,
     /// Redrive policy.
     RedrivePolicy,
+    /// Redrive allow policy.
+    RedriveAllowPolicy,
     /// FIFO queue flag.
     FifoQueue,
     /// Content-based deduplication.
@@ -168,6 +170,7 @@ impl FromStr for QueueAttribute {
             "MessageRetentionPeriod" => Ok(Self::MessageRetentionPeriod),
             "DelaySeconds" => Ok(Self::DelaySeconds),
             "RedrivePolicy" => Ok(Self::RedrivePolicy),
+            "RedriveAllowPolicy" => Ok(Self::RedriveAllowPolicy),
             "FifoQueue" => Ok(Self::FifoQueue),
             "ContentBasedDeduplication" => Ok(Self::ContentBasedDeduplication),
             "QueueArn" => Ok(Self::QueueArn),
@@ -193,6 +196,7 @@ impl QueueAttribute {
             Self::MessageRetentionPeriod => "MessageRetentionPeriod",
             Self::DelaySeconds => "DelaySeconds",
             Self::RedrivePolicy => "RedrivePolicy",
+            Self::RedriveAllowPolicy => "RedriveAllowPolicy",
             Self::FifoQueue => "FifoQueue",
             Self::ContentBasedDeduplication => "ContentBasedDeduplication",
             Self::QueueArn => "QueueArn",

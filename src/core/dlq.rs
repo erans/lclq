@@ -143,6 +143,7 @@ mod tests {
             dlq_config,
             content_based_deduplication: false,
             tags: std::collections::HashMap::new(),
+            redrive_allow_policy: None,
         }
     }
 

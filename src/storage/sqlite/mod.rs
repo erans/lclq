@@ -352,7 +352,7 @@ impl StorageBackend for SqliteBackend {
         let now = Utc::now().timestamp();
         let queue_type_str = Self::queue_type_to_string(&config.queue_type);
 
-        // Serialize DLQ config and tags to JSON
+        // Serialize DLQ config, tags, and redrive allow policy to JSON
         let dlq_config_json = config
             .dlq_config
             .as_ref()
@@ -364,13 +364,18 @@ impl StorageBackend for SqliteBackend {
             serde_json::to_string(&config.tags).ok()
         };
 
+        let redrive_allow_policy_json = config
+            .redrive_allow_policy
+            .as_ref()
+            .and_then(|p| serde_json::to_string(p).ok());
+
         sqlx::query(
             r#"
             INSERT INTO queues (
                 id, name, queue_type, visibility_timeout, message_retention_period,
                 max_message_size, delay_seconds, content_based_deduplication,
-                dlq_config, tags, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                dlq_config, tags, redrive_allow_policy, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&config.id)
@@ -383,6 +388,7 @@ impl StorageBackend for SqliteBackend {
         .bind(config.content_based_deduplication)
         .bind(dlq_config_json)
         .bind(tags_json)
+        .bind(redrive_allow_policy_json)
         .bind(now)
         .bind(now)
         .execute(&self.pool)
@@ -406,7 +412,7 @@ impl StorageBackend for SqliteBackend {
             r#"
             SELECT id, name, queue_type, visibility_timeout, message_retention_period,
                    max_message_size, delay_seconds, content_based_deduplication,
-                   dlq_config, tags
+                   dlq_config, tags, redrive_allow_policy
             FROM queues
             WHERE id = ?
             "#,
@@ -420,7 +426,7 @@ impl StorageBackend for SqliteBackend {
         // Parse row into QueueConfig
         let queue_type = Self::string_to_queue_type(row.get("queue_type"))?;
 
-        let dlq_config: Option<DlqConfig> = row
+        let dlq_config: Option<crate::types::DlqConfig> = row
             .get::<Option<String>, _>("dlq_config")
             .and_then(|json| serde_json::from_str(&json).ok());
 
@@ -428,6 +434,10 @@ impl StorageBackend for SqliteBackend {
             .get::<Option<String>, _>("tags")
             .and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default();
+
+        let redrive_allow_policy: Option<crate::types::RedriveAllowPolicy> = row
+            .get::<Option<String>, _>("redrive_allow_policy")
+            .and_then(|json| serde_json::from_str(&json).ok());
 
         Ok(QueueConfig {
             id: row.get("id"),
@@ -440,6 +450,7 @@ impl StorageBackend for SqliteBackend {
             dlq_config,
             content_based_deduplication: row.get("content_based_deduplication"),
             tags,
+            redrive_allow_policy,
         })
     }
 
@@ -473,7 +484,7 @@ impl StorageBackend for SqliteBackend {
                     r#"
                     SELECT id, name, queue_type, visibility_timeout, message_retention_period,
                            max_message_size, delay_seconds, content_based_deduplication,
-                           dlq_config, tags
+                           dlq_config, tags, redrive_allow_policy
                     FROM queues
                     WHERE name LIKE ? || '%'
                     ORDER BY name
@@ -488,7 +499,7 @@ impl StorageBackend for SqliteBackend {
                     r#"
                     SELECT id, name, queue_type, visibility_timeout, message_retention_period,
                            max_message_size, delay_seconds, content_based_deduplication,
-                           dlq_config, tags
+                           dlq_config, tags, redrive_allow_policy
                     FROM queues
                     ORDER BY name
                     "#
@@ -502,7 +513,7 @@ impl StorageBackend for SqliteBackend {
                 r#"
                 SELECT id, name, queue_type, visibility_timeout, message_retention_period,
                        max_message_size, delay_seconds, content_based_deduplication,
-                       dlq_config, tags
+                       dlq_config, tags, redrive_allow_policy
                 FROM queues
                 ORDER BY name
                 "#
@@ -516,7 +527,7 @@ impl StorageBackend for SqliteBackend {
         for row in rows {
             let queue_type = Self::string_to_queue_type(row.get("queue_type"))?;
 
-            let dlq_config: Option<DlqConfig> = row
+            let dlq_config: Option<crate::types::DlqConfig> = row
                 .get::<Option<String>, _>("dlq_config")
                 .and_then(|json| serde_json::from_str(&json).ok());
 
@@ -524,6 +535,10 @@ impl StorageBackend for SqliteBackend {
                 .get::<Option<String>, _>("tags")
                 .and_then(|json| serde_json::from_str(&json).ok())
                 .unwrap_or_default();
+
+            let redrive_allow_policy: Option<crate::types::RedriveAllowPolicy> = row
+                .get::<Option<String>, _>("redrive_allow_policy")
+                .and_then(|json| serde_json::from_str(&json).ok());
 
             queues.push(QueueConfig {
                 id: row.get("id"),
@@ -536,6 +551,7 @@ impl StorageBackend for SqliteBackend {
                 dlq_config,
                 content_based_deduplication: row.get("content_based_deduplication"),
                 tags,
+                redrive_allow_policy,
             });
         }
 
@@ -548,7 +564,7 @@ impl StorageBackend for SqliteBackend {
 
         let now = Utc::now().timestamp();
 
-        // Serialize DLQ config and tags to JSON
+        // Serialize DLQ config, tags, and redrive allow policy to JSON
         let dlq_config_json = config
             .dlq_config
             .as_ref()
@@ -560,6 +576,11 @@ impl StorageBackend for SqliteBackend {
             serde_json::to_string(&config.tags).ok()
         };
 
+        let redrive_allow_policy_json = config
+            .redrive_allow_policy
+            .as_ref()
+            .and_then(|p| serde_json::to_string(p).ok());
+
         let result = sqlx::query(
             r#"
             UPDATE queues
@@ -570,6 +591,7 @@ impl StorageBackend for SqliteBackend {
                 content_based_deduplication = ?,
                 dlq_config = ?,
                 tags = ?,
+                redrive_allow_policy = ?,
                 updated_at = ?
             WHERE id = ?
             "#,
@@ -581,6 +603,7 @@ impl StorageBackend for SqliteBackend {
         .bind(config.content_based_deduplication)
         .bind(dlq_config_json)
         .bind(tags_json)
+        .bind(redrive_allow_policy_json)
         .bind(now)
         .bind(&config.id)
         .execute(&self.pool)
