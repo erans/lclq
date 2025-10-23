@@ -59,4 +59,7 @@ urlencoding = "2.1"
 # XML handling
 quick-xml = { version = "0.37", features = ["serialize"] }
 
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate", "chrono", "uuid"] }
+
 [dev-dependencies]

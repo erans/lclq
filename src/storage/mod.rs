@@ -5,6 +5,8 @@ use crate::Result;
 use async_trait::async_trait;
 
 pub mod memory;
+/// SQLite-based persistent storage backend.
+pub mod sqlite;
 
 /// Filter for listing queues.
 #[derive(Debug, Clone, Default)]

@@ -826,7 +826,7 @@ impl SqsHandler {
         for attr_name in &requested_attrs {
             match attr_name.parse::<crate::sqs::QueueAttribute>() {
                 Ok(attr) => {
-                    self.add_queue_attribute(&mut attributes, &attr, &queue_config, &stats, request_all);
+                    Self::add_queue_attribute(&mut attributes, &attr, &queue_config, &stats, request_all);
                 }
                 Err(_) => {
                     // Unknown attribute, ignore (AWS behavior)
@@ -884,7 +884,7 @@ impl SqsHandler {
                 }
                 "MessageRetentionPeriod" => {
                     match value.parse::<u32>() {
-                        Ok(period) if period >= 60 && period <= 1209600 => {
+                        Ok(period) if (60..=1209600).contains(&period) => {
                             queue_config.message_retention_period = period;
                         }
                         _ => {
@@ -897,7 +897,7 @@ impl SqsHandler {
                 }
                 "MaximumMessageSize" => {
                     match value.parse::<usize>() {
-                        Ok(size) if size >= 1024 && size <= 262144 => {
+                        Ok(size) if (1024..=262144).contains(&size) => {
                             queue_config.max_message_size = size;
                         }
                         _ => {
@@ -948,7 +948,7 @@ impl SqsHandler {
 
                             if let (Some(arn), Some(max_count)) = (target_arn, max_receive_count) {
                                 // Extract queue name from ARN (format: arn:aws:sqs:region:account:queue-name)
-                                let target_queue_id = arn.split(':').last().unwrap_or(arn).to_string();
+                                let target_queue_id = arn.split(':').next_back().unwrap_or(arn).to_string();
 
                                 queue_config.dlq_config = Some(DlqConfig {
                                     target_queue_id,
@@ -995,7 +995,6 @@ impl SqsHandler {
 
     /// Add a queue attribute to the attributes list.
     fn add_queue_attribute(
-        &self,
         attributes: &mut Vec<(String, String)>,
         attr: &crate::sqs::QueueAttribute,
         queue_config: &QueueConfig,
@@ -1007,21 +1006,21 @@ impl SqsHandler {
         match attr {
             QueueAttribute::All => {
                 // Add all attributes
-                self.add_queue_attribute(attributes, &QueueAttribute::VisibilityTimeout, queue_config, stats, false);
-                self.add_queue_attribute(attributes, &QueueAttribute::DelaySeconds, queue_config, stats, false);
-                self.add_queue_attribute(attributes, &QueueAttribute::MaximumMessageSize, queue_config, stats, false);
-                self.add_queue_attribute(attributes, &QueueAttribute::MessageRetentionPeriod, queue_config, stats, false);
-                self.add_queue_attribute(attributes, &QueueAttribute::ApproximateNumberOfMessages, queue_config, stats, false);
-                self.add_queue_attribute(attributes, &QueueAttribute::ApproximateNumberOfMessagesNotVisible, queue_config, stats, false);
-                self.add_queue_attribute(attributes, &QueueAttribute::QueueArn, queue_config, stats, false);
+                Self::add_queue_attribute(attributes, &QueueAttribute::VisibilityTimeout, queue_config, stats, false);
+                Self::add_queue_attribute(attributes, &QueueAttribute::DelaySeconds, queue_config, stats, false);
+                Self::add_queue_attribute(attributes, &QueueAttribute::MaximumMessageSize, queue_config, stats, false);
+                Self::add_queue_attribute(attributes, &QueueAttribute::MessageRetentionPeriod, queue_config, stats, false);
+                Self::add_queue_attribute(attributes, &QueueAttribute::ApproximateNumberOfMessages, queue_config, stats, false);
+                Self::add_queue_attribute(attributes, &QueueAttribute::ApproximateNumberOfMessagesNotVisible, queue_config, stats, false);
+                Self::add_queue_attribute(attributes, &QueueAttribute::QueueArn, queue_config, stats, false);
 
                 if queue_config.queue_type == crate::types::QueueType::SqsFifo {
-                    self.add_queue_attribute(attributes, &QueueAttribute::FifoQueue, queue_config, stats, false);
-                    self.add_queue_attribute(attributes, &QueueAttribute::ContentBasedDeduplication, queue_config, stats, false);
+                    Self::add_queue_attribute(attributes, &QueueAttribute::FifoQueue, queue_config, stats, false);
+                    Self::add_queue_attribute(attributes, &QueueAttribute::ContentBasedDeduplication, queue_config, stats, false);
                 }
 
                 if queue_config.dlq_config.is_some() {
-                    self.add_queue_attribute(attributes, &QueueAttribute::RedrivePolicy, queue_config, stats, false);
+                    Self::add_queue_attribute(attributes, &QueueAttribute::RedrivePolicy, queue_config, stats, false);
                 }
             }
             QueueAttribute::VisibilityTimeout => {
