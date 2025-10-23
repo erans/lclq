@@ -8,6 +8,8 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+/// Command-line interface
+pub mod cli;
 pub mod config;
 pub mod core;
 pub mod error;

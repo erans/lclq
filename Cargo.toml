@@ -64,4 +64,16 @@ quick-xml = { version = "0.37", features = ["serialize"] }
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate", "chrono", "uuid"] }
 
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
+tabled = "0.16"
+colored = "2.1"
+
+# Metrics
+prometheus = "0.13"
+
+# Graceful shutdown
+signal-hook = "0.3"
+signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
+
 [dev-dependencies]
