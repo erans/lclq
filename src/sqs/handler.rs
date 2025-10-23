@@ -9,10 +9,10 @@ use tracing::{debug, info};
 use crate::config::LclqConfig;
 use crate::sqs::{
     build_create_queue_response, build_delete_message_response, build_error_response,
-    build_get_queue_url_response, build_list_queues_response, build_receive_message_response,
-    build_send_message_response, calculate_md5_of_attributes, calculate_md5_of_body,
-    extract_queue_name_from_url, MessageAttributeInfo, ReceivedMessageInfo, SqsAction,
-    SqsErrorCode, SqsRequest,
+    build_get_queue_attributes_response, build_get_queue_url_response,
+    build_list_queues_response, build_receive_message_response, build_send_message_response,
+    calculate_md5_of_attributes, calculate_md5_of_body, extract_queue_name_from_url,
+    MessageAttributeInfo, ReceivedMessageInfo, SqsAction, SqsErrorCode, SqsRequest,
 };
 use crate::storage::{QueueFilter, StorageBackend};
 use crate::types::validation::{validate_sqs_queue_name, SQS_MAX_MESSAGE_SIZE};
@@ -53,6 +53,7 @@ impl SqsHandler {
             SqsAction::ReceiveMessage => self.handle_receive_message(request).await,
             SqsAction::DeleteMessage => self.handle_delete_message(request).await,
             SqsAction::PurgeQueue => self.handle_purge_queue(request).await,
+            SqsAction::GetQueueAttributes => self.handle_get_queue_attributes(request).await,
             _ => build_error_response(
                 SqsErrorCode::InvalidParameterValue,
                 "Action not yet implemented",
@@ -463,6 +464,150 @@ impl SqsHandler {
         }
     }
 
+    /// Handle GetQueueAttributes action.
+    async fn handle_get_queue_attributes(&self, request: SqsRequest) -> String {
+        let queue_url = match request.get_required_param("QueueUrl") {
+            Ok(url) => url,
+            Err(e) => return build_error_response(SqsErrorCode::MissingParameter, &e),
+        };
+
+        let queue_name = match extract_queue_name_from_url(queue_url) {
+            Some(name) => name,
+            None => {
+                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+            }
+        };
+
+        // Parse requested attribute names
+        let mut requested_attrs = request.parse_attribute_names();
+
+        // If no attributes specified, default to "All"
+        if requested_attrs.is_empty() {
+            requested_attrs.push("All".to_string());
+        }
+
+        // Check if "All" is requested
+        let request_all = requested_attrs.iter().any(|a| a == "All");
+
+        // Get queue config and stats
+        let queue_config = match self.backend.get_queue(&queue_name).await {
+            Ok(config) => config,
+            Err(_) => {
+                return build_error_response(
+                    SqsErrorCode::QueueDoesNotExist,
+                    "The specified queue does not exist",
+                )
+            }
+        };
+
+        let stats = match self.backend.get_stats(&queue_name).await {
+            Ok(s) => s,
+            Err(e) => {
+                return build_error_response(SqsErrorCode::InternalError, &e.to_string())
+            }
+        };
+
+        // Build attribute list
+        let mut attributes: Vec<(String, String)> = Vec::new();
+
+        for attr_name in &requested_attrs {
+            match attr_name.parse::<crate::sqs::QueueAttribute>() {
+                Ok(attr) => {
+                    self.add_queue_attribute(&mut attributes, &attr, &queue_config, &stats, request_all);
+                }
+                Err(_) => {
+                    // Unknown attribute, ignore (AWS behavior)
+                    debug!(attribute = %attr_name, "Unknown attribute requested");
+                }
+            }
+        }
+
+        build_get_queue_attributes_response(&attributes)
+    }
+
+    /// Add a queue attribute to the attributes list.
+    fn add_queue_attribute(
+        &self,
+        attributes: &mut Vec<(String, String)>,
+        attr: &crate::sqs::QueueAttribute,
+        queue_config: &QueueConfig,
+        stats: &crate::types::QueueStats,
+        _include_all: bool,
+    ) {
+        use crate::sqs::QueueAttribute;
+
+        match attr {
+            QueueAttribute::All => {
+                // Add all attributes
+                self.add_queue_attribute(attributes, &QueueAttribute::VisibilityTimeout, queue_config, stats, false);
+                self.add_queue_attribute(attributes, &QueueAttribute::DelaySeconds, queue_config, stats, false);
+                self.add_queue_attribute(attributes, &QueueAttribute::MaximumMessageSize, queue_config, stats, false);
+                self.add_queue_attribute(attributes, &QueueAttribute::MessageRetentionPeriod, queue_config, stats, false);
+                self.add_queue_attribute(attributes, &QueueAttribute::ApproximateNumberOfMessages, queue_config, stats, false);
+                self.add_queue_attribute(attributes, &QueueAttribute::ApproximateNumberOfMessagesNotVisible, queue_config, stats, false);
+                self.add_queue_attribute(attributes, &QueueAttribute::QueueArn, queue_config, stats, false);
+
+                if queue_config.queue_type == crate::types::QueueType::SqsFifo {
+                    self.add_queue_attribute(attributes, &QueueAttribute::FifoQueue, queue_config, stats, false);
+                    self.add_queue_attribute(attributes, &QueueAttribute::ContentBasedDeduplication, queue_config, stats, false);
+                }
+
+                if queue_config.dlq_config.is_some() {
+                    self.add_queue_attribute(attributes, &QueueAttribute::RedrivePolicy, queue_config, stats, false);
+                }
+            }
+            QueueAttribute::VisibilityTimeout => {
+                attributes.push(("VisibilityTimeout".to_string(), queue_config.visibility_timeout.to_string()));
+            }
+            QueueAttribute::DelaySeconds => {
+                attributes.push(("DelaySeconds".to_string(), queue_config.delay_seconds.to_string()));
+            }
+            QueueAttribute::MaximumMessageSize => {
+                attributes.push(("MaximumMessageSize".to_string(), queue_config.max_message_size.to_string()));
+            }
+            QueueAttribute::MessageRetentionPeriod => {
+                attributes.push(("MessageRetentionPeriod".to_string(), queue_config.message_retention_period.to_string()));
+            }
+            QueueAttribute::ApproximateNumberOfMessages => {
+                attributes.push(("ApproximateNumberOfMessages".to_string(), stats.available_messages.to_string()));
+            }
+            QueueAttribute::ApproximateNumberOfMessagesNotVisible => {
+                attributes.push(("ApproximateNumberOfMessagesNotVisible".to_string(), stats.in_flight_messages.to_string()));
+            }
+            QueueAttribute::ApproximateNumberOfMessagesDelayed => {
+                // TODO: Track delayed messages separately
+                attributes.push(("ApproximateNumberOfMessagesDelayed".to_string(), "0".to_string()));
+            }
+            QueueAttribute::QueueArn => {
+                // Generate a fake ARN (local development)
+                let arn = format!("arn:aws:sqs:us-east-1:000000000000:{}", queue_config.name);
+                attributes.push(("QueueArn".to_string(), arn));
+            }
+            QueueAttribute::FifoQueue => {
+                let is_fifo = queue_config.queue_type == crate::types::QueueType::SqsFifo;
+                attributes.push(("FifoQueue".to_string(), is_fifo.to_string()));
+            }
+            QueueAttribute::ContentBasedDeduplication => {
+                attributes.push(("ContentBasedDeduplication".to_string(), queue_config.content_based_deduplication.to_string()));
+            }
+            QueueAttribute::RedrivePolicy => {
+                if let Some(dlq) = &queue_config.dlq_config {
+                    // Format as JSON
+                    let policy = format!(
+                        r#"{{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:{}","maxReceiveCount":{}}}"#,
+                        dlq.target_queue_id, dlq.max_receive_count
+                    );
+                    attributes.push(("RedrivePolicy".to_string(), policy));
+                }
+            }
+            QueueAttribute::CreatedTimestamp | QueueAttribute::LastModifiedTimestamp => {
+                // TODO: Track these timestamps in QueueConfig
+                let now = chrono::Utc::now().timestamp();
+                attributes.push((attr.as_str().to_string(), now.to_string()));
+            }
+        }
+    }
+
     /// Generate queue URL for a queue name.
     fn get_queue_url(&self, queue_name: &str) -> String {
         format!("{}/queue/{}", self.base_url, queue_name)
@@ -550,6 +695,40 @@ fn xml_to_json_response(xml: &str) -> String {
         }
 
         return json!({"QueueUrls": queue_urls}).to_string();
+    }
+
+    // For GetQueueAttributes - collect all Attribute elements into a map
+    if xml.contains("GetQueueAttributesResponse") || xml.contains("GetQueueAttributesResult") {
+        let mut attributes = serde_json::Map::new();
+        let mut pos = 0;
+
+        while let Some(attr_start) = xml[pos..].find("<Attribute>") {
+            let abs_start = pos + attr_start;
+            if let Some(attr_end_rel) = xml[abs_start..].find("</Attribute>") {
+                let attr_xml = &xml[abs_start..abs_start + attr_end_rel + 12];
+
+                // Extract Name
+                if let Some(name_start) = attr_xml.find("<Name>") {
+                    if let Some(name_end) = attr_xml.find("</Name>") {
+                        let name = &attr_xml[name_start + 6..name_end];
+
+                        // Extract Value
+                        if let Some(value_start) = attr_xml.find("<Value>") {
+                            if let Some(value_end) = attr_xml.find("</Value>") {
+                                let value = &attr_xml[value_start + 7..value_end];
+                                attributes.insert(name.to_string(), json!(value));
+                            }
+                        }
+                    }
+                }
+
+                pos = abs_start + attr_end_rel + 12;
+            } else {
+                break;
+            }
+        }
+
+        return json!({"Attributes": attributes}).to_string();
     }
 
     // Simple parsing - extract QueueUrl if present (for CreateQueue, GetQueueUrl)

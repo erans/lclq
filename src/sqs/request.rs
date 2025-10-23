@@ -231,11 +231,25 @@ impl SqsRequest {
     pub fn parse_attribute_names(&self) -> Vec<String> {
         let mut names = Vec::new();
 
-        // Attribute names are encoded as:
+        // For JSON requests, AttributeNames is a JSON array string
+        if let Some(attr_names_json) = self.get_param("AttributeNames") {
+            // Try to parse as JSON array
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(attr_names_json) {
+                if let Some(arr) = json_value.as_array() {
+                    for val in arr {
+                        if let Some(s) = val.as_str() {
+                            names.push(s.to_string());
+                        }
+                    }
+                    return names;
+                }
+            }
+        }
+
+        // For form-encoded requests, attribute names are encoded as:
         // AttributeName.1=VisibilityTimeout
         // AttributeName.2=DelaySeconds
         // ...
-
         let mut index = 1;
         loop {
             let key = format!("AttributeName.{}", index);

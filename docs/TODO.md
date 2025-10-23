@@ -226,7 +226,7 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] `CreateQueue` - create standard or FIFO queue
   - [x] `DeleteQueue` - remove queue
   - [x] `GetQueueUrl` - get URL from queue name
-  - [ ] `GetQueueAttributes` - retrieve queue attributes
+  - [x] `GetQueueAttributes` - retrieve queue attributes
   - [ ] `SetQueueAttributes` - modify queue attributes
   - [x] `ListQueues` - list queues with prefix filter
   - [x] `PurgeQueue` - remove all messages

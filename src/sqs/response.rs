@@ -174,6 +174,31 @@ pub fn build_list_queues_response(queue_urls: &[String]) -> String {
     xml
 }
 
+/// Build a GetQueueAttributes response.
+pub fn build_get_queue_attributes_response(attributes: &[(String, String)]) -> String {
+    let mut xml = String::new();
+    xml.push_str(r#"<?xml version="1.0"?>"#);
+    xml.push('\n');
+    xml.push_str(r#"<GetQueueAttributesResponse xmlns="http://queue.amazonaws.com/doc/2012-11-05/">"#);
+    xml.push('\n');
+    xml.push_str("  <GetQueueAttributesResult>\n");
+
+    for (name, value) in attributes {
+        xml.push_str("    <Attribute>\n");
+        xml.push_str(&format!("      <Name>{}</Name>\n", escape_xml(name)));
+        xml.push_str(&format!("      <Value>{}</Value>\n", escape_xml(value)));
+        xml.push_str("    </Attribute>\n");
+    }
+
+    xml.push_str("  </GetQueueAttributesResult>\n");
+    xml.push_str("  <ResponseMetadata>\n");
+    xml.push_str(&format!("    <RequestId>{}</RequestId>\n", Uuid::new_v4()));
+    xml.push_str("  </ResponseMetadata>\n");
+    xml.push_str("</GetQueueAttributesResponse>");
+
+    xml
+}
+
 /// Information about a received message for XML response.
 pub struct ReceivedMessageInfo {
     /// Message ID.
