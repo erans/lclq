@@ -1,0 +1,47 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Generated files
+*.profraw
+*.profdata
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+coverage/
+*.gcno
+*.gcda
+
+# Benchmarking
+flamegraph.svg
+perf.data
+perf.data.old
+
+# Local data
+*.db
+*.sqlite
+*.sqlite3
+lclq-data/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Documentation
+/target/doc/
+
+# CI/CD artifacts
+.github/workflows/*.lock

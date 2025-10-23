@@ -1,0 +1,13 @@
+# Clippy configuration for lclq
+
+# Deny common issues
+msrv = "1.82"
+
+# Complexity lints
+cognitive-complexity-threshold = 30
+
+# Documentation
+missing-docs-in-private-items = false
+
+# Performance
+too-many-lines-threshold = 300
