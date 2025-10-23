@@ -54,6 +54,7 @@ impl SqsHandler {
             SqsAction::DeleteMessage => self.handle_delete_message(request).await,
             SqsAction::PurgeQueue => self.handle_purge_queue(request).await,
             SqsAction::GetQueueAttributes => self.handle_get_queue_attributes(request).await,
+            SqsAction::SetQueueAttributes => self.handle_set_queue_attributes(request).await,
             _ => build_error_response(
                 SqsErrorCode::InvalidParameterValue,
                 "Action not yet implemented",
@@ -523,6 +524,161 @@ impl SqsHandler {
         }
 
         build_get_queue_attributes_response(&attributes)
+    }
+
+    /// Handle SetQueueAttributes action.
+    async fn handle_set_queue_attributes(&self, request: SqsRequest) -> String {
+        let queue_url = match request.get_required_param("QueueUrl") {
+            Ok(url) => url,
+            Err(e) => return build_error_response(SqsErrorCode::MissingParameter, &e),
+        };
+
+        let queue_name = match extract_queue_name_from_url(queue_url) {
+            Some(name) => name,
+            None => {
+                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+            }
+        };
+
+        // Get current queue configuration
+        let mut queue_config = match self.backend.get_queue(&queue_name).await {
+            Ok(config) => config,
+            Err(_) => {
+                return build_error_response(
+                    SqsErrorCode::QueueDoesNotExist,
+                    "The specified queue does not exist",
+                )
+            }
+        };
+
+        // Parse attributes to update
+        let attributes = request.parse_queue_attributes();
+
+        // Update modifiable attributes
+        for (key, value) in attributes {
+            match key.as_str() {
+                "VisibilityTimeout" => {
+                    match value.parse::<u32>() {
+                        Ok(timeout) if timeout <= 43200 => {
+                            queue_config.visibility_timeout = timeout;
+                        }
+                        _ => {
+                            return build_error_response(
+                                SqsErrorCode::InvalidParameterValue,
+                                "VisibilityTimeout must be between 0 and 43200 seconds",
+                            )
+                        }
+                    }
+                }
+                "MessageRetentionPeriod" => {
+                    match value.parse::<u32>() {
+                        Ok(period) if period >= 60 && period <= 1209600 => {
+                            queue_config.message_retention_period = period;
+                        }
+                        _ => {
+                            return build_error_response(
+                                SqsErrorCode::InvalidParameterValue,
+                                "MessageRetentionPeriod must be between 60 and 1209600 seconds",
+                            )
+                        }
+                    }
+                }
+                "MaximumMessageSize" => {
+                    match value.parse::<usize>() {
+                        Ok(size) if size >= 1024 && size <= 262144 => {
+                            queue_config.max_message_size = size;
+                        }
+                        _ => {
+                            return build_error_response(
+                                SqsErrorCode::InvalidParameterValue,
+                                "MaximumMessageSize must be between 1024 and 262144 bytes",
+                            )
+                        }
+                    }
+                }
+                "DelaySeconds" => {
+                    match value.parse::<u32>() {
+                        Ok(delay) if delay <= 900 => {
+                            queue_config.delay_seconds = delay;
+                        }
+                        _ => {
+                            return build_error_response(
+                                SqsErrorCode::InvalidParameterValue,
+                                "DelaySeconds must be between 0 and 900 seconds",
+                            )
+                        }
+                    }
+                }
+                "ContentBasedDeduplication" => {
+                    if queue_config.queue_type != QueueType::SqsFifo {
+                        return build_error_response(
+                            SqsErrorCode::InvalidParameterValue,
+                            "ContentBasedDeduplication is only valid for FIFO queues",
+                        );
+                    }
+                    match value.to_lowercase().as_str() {
+                        "true" => queue_config.content_based_deduplication = true,
+                        "false" => queue_config.content_based_deduplication = false,
+                        _ => {
+                            return build_error_response(
+                                SqsErrorCode::InvalidParameterValue,
+                                "ContentBasedDeduplication must be 'true' or 'false'",
+                            )
+                        }
+                    }
+                }
+                "RedrivePolicy" => {
+                    // Parse the redrive policy JSON
+                    match serde_json::from_str::<serde_json::Value>(&value) {
+                        Ok(policy) => {
+                            let target_arn = policy["deadLetterTargetArn"].as_str();
+                            let max_receive_count = policy["maxReceiveCount"].as_u64();
+
+                            if let (Some(arn), Some(max_count)) = (target_arn, max_receive_count) {
+                                // Extract queue name from ARN (format: arn:aws:sqs:region:account:queue-name)
+                                let target_queue_id = arn.split(':').last().unwrap_or(arn).to_string();
+
+                                queue_config.dlq_config = Some(DlqConfig {
+                                    target_queue_id,
+                                    max_receive_count: max_count as u32,
+                                });
+                            } else {
+                                return build_error_response(
+                                    SqsErrorCode::InvalidParameterValue,
+                                    "Invalid RedrivePolicy format",
+                                );
+                            }
+                        }
+                        Err(_) => {
+                            return build_error_response(
+                                SqsErrorCode::InvalidParameterValue,
+                                "Invalid RedrivePolicy JSON",
+                            )
+                        }
+                    }
+                }
+                "FifoQueue" => {
+                    // FifoQueue cannot be changed after queue creation
+                    return build_error_response(
+                        SqsErrorCode::InvalidParameterValue,
+                        "FifoQueue attribute cannot be modified",
+                    );
+                }
+                _ => {
+                    // Unknown attribute, ignore (AWS behavior)
+                    debug!(attribute = %key, "Unknown attribute in SetQueueAttributes");
+                }
+            }
+        }
+
+        // Update the queue in the backend
+        match self.backend.update_queue(queue_config).await {
+            Ok(_) => {
+                info!(queue_name = %queue_name, "Queue attributes updated");
+                build_delete_message_response() // SetQueueAttributes has empty response
+            }
+            Err(e) => build_error_response(SqsErrorCode::InternalError, &e.to_string()),
+        }
     }
 
     /// Add a queue attribute to the attributes list.
