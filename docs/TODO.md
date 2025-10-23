@@ -298,9 +298,14 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Message attributes
   - [x] Batch send/receive operations
   - [x] DeleteMessage and DeleteQueue
+  - [ ] GetQueueAttributes - retrieve queue configuration
+  - [ ] SetQueueAttributes - modify queue settings
+  - [ ] DeleteMessageBatch - batch delete operations
+  - [ ] ChangeMessageVisibility - single message visibility changes
+  - [ ] ChangeMessageVisibilityBatch - batch visibility changes
   - [ ] Dead letter queue functionality
   - [ ] Long polling
-  - [ ] Visibility timeout changes
+  - [ ] Delay queues with per-message delays
 
 ---
 
