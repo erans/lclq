@@ -533,20 +533,41 @@ impl StorageBackend for InMemoryBackend {
             .get_mut(queue_id)
             .ok_or_else(|| Error::QueueNotFound(queue_id.to_string()))?;
 
-        let in_flight = queue
-            .in_flight_messages
-            .get_mut(&handle_data.message_id.0)
-            .ok_or(Error::MessageNotFound(handle_data.message_id.0.clone()))?;
+        // If visibility timeout is 0, immediately return message to available queue
+        if visibility_timeout == 0 {
+            let in_flight_msg = queue
+                .in_flight_messages
+                .remove(&handle_data.message_id.0)
+                .ok_or(Error::MessageNotFound(handle_data.message_id.0.clone()))?;
 
-        in_flight.visibility_expires_at =
-            Utc::now() + Duration::seconds(visibility_timeout as i64);
+            // Put message back into available queue with immediate visibility
+            queue.available_messages.push_back(StoredMessage {
+                message: in_flight_msg.message,
+                visible_at: Utc::now(), // Immediately visible
+            });
 
-        debug!(
-            queue_id = %queue_id,
-            message_id = %handle_data.message_id,
-            visibility_timeout = visibility_timeout,
-            "Visibility timeout changed"
-        );
+            debug!(
+                queue_id = %queue_id,
+                message_id = %handle_data.message_id,
+                "Message returned to queue (visibility timeout set to 0)"
+            );
+        } else {
+            // Update visibility timeout for in-flight message
+            let in_flight = queue
+                .in_flight_messages
+                .get_mut(&handle_data.message_id.0)
+                .ok_or(Error::MessageNotFound(handle_data.message_id.0.clone()))?;
+
+            in_flight.visibility_expires_at =
+                Utc::now() + Duration::seconds(visibility_timeout as i64);
+
+            debug!(
+                queue_id = %queue_id,
+                message_id = %handle_data.message_id,
+                visibility_timeout = visibility_timeout,
+                "Visibility timeout changed"
+            );
+        }
 
         Ok(())
     }
