@@ -78,6 +78,14 @@ prometheus = "0.13"
 signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 
+# gRPC and Protocol Buffers
+tonic = "0.12"
+prost = "0.13"
+prost-types = "0.13"
+
+[build-dependencies]
+tonic-build = "0.12"
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 tokio-test = "0.4"
