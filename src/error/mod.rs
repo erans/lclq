@@ -18,7 +18,15 @@ pub enum Error {
 
     /// Storage backend error.
     #[error("Storage error: {0}")]
-    Storage(String),
+    StorageError(String),
+
+    /// Queue already exists.
+    #[error("Queue already exists: {0}")]
+    QueueAlreadyExists(String),
+
+    /// Feature not yet implemented.
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
 
     /// Queue not found.
     #[error("Queue not found: {0}")]

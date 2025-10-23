@@ -75,6 +75,57 @@ impl SqliteBackend {
         Ok(Self { pool })
     }
 
+    /// Process expired visibility timeouts and return messages to available state.
+    pub async fn process_expired_visibility(&self) -> Result<u64> {
+        let now = Utc::now().timestamp_millis();
+
+        // Return messages with expired visibility to available state
+        let result = sqlx::query(
+            r#"
+            UPDATE messages
+            SET state = 'available',
+                visible_at = ?,
+                receipt_handle = NULL,
+                visibility_expires_at = NULL
+            WHERE state = 'in_flight'
+              AND visibility_expires_at IS NOT NULL
+              AND visibility_expires_at <= ?
+            "#
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| Error::StorageError(format!("Failed to process expired visibility: {}", e)))?;
+
+        let count = result.rows_affected();
+        if count > 0 {
+            info!(messages_returned = count, "Returned expired messages to queue");
+        }
+
+        Ok(count)
+    }
+
+    /// Clean up expired deduplication cache entries.
+    pub async fn cleanup_deduplication_cache(&self) -> Result<u64> {
+        let now = Utc::now().timestamp();
+
+        let result = sqlx::query(
+            "DELETE FROM deduplication_cache WHERE expires_at <= ?"
+        )
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| Error::StorageError(format!("Failed to cleanup deduplication cache: {}", e)))?;
+
+        let count = result.rows_affected();
+        if count > 0 {
+            debug!(entries_deleted = count, "Cleaned up deduplication cache");
+        }
+
+        Ok(count)
+    }
+
     /// Helper: Convert QueueType to string for database storage.
     fn queue_type_to_string(queue_type: &QueueType) -> &'static str {
         match queue_type {
@@ -121,6 +172,126 @@ impl SqliteBackend {
             sequence_number: row.get::<Option<i64>, _>("sequence_number").map(|n| n as u64),
             delay_seconds: row.get::<Option<i64>, _>("delay_seconds").map(|d| d as u32),
         })
+    }
+}
+
+impl SqliteBackend {
+    /// Helper method to send a message within a transaction or pool.
+    async fn send_message_impl<'e, E>(
+        &self,
+        executor: E,
+        queue_id: &str,
+        mut message: Message,
+    ) -> Result<Message>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    {
+        // Get queue config to check FIFO settings
+        let queue = self.get_queue(queue_id).await?;
+
+        // Handle FIFO deduplication
+        if queue.queue_type == QueueType::SqsFifo {
+            let dedup_id = if let Some(ref id) = message.deduplication_id {
+                id.clone()
+            } else if queue.content_based_deduplication {
+                // Generate content-based dedup ID (SHA256 of body)
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(message.body.as_bytes());
+                format!("{:x}", hasher.finalize())
+            } else {
+                return Err(Error::Validation(
+                    crate::error::ValidationError::InvalidParameter {
+                        name: "MessageDeduplicationId".to_string(),
+                        reason: "Required for FIFO queues without content-based deduplication"
+                            .to_string(),
+                    },
+                ));
+            };
+
+            // Check deduplication cache (5 minute window)
+            let cutoff = Utc::now().timestamp() - 300; // 5 minutes ago
+            let cached = sqlx::query(
+                "SELECT expires_at FROM deduplication_cache WHERE queue_id = ? AND deduplication_id = ? AND expires_at > ?"
+            )
+            .bind(queue_id)
+            .bind(&dedup_id)
+            .bind(cutoff)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| Error::StorageError(format!("Failed to check deduplication: {}", e)))?;
+
+            if cached.is_some() {
+                debug!(
+                    queue_id = %queue_id,
+                    dedup_id = %dedup_id,
+                    "Message deduplicated (already sent within 5 minutes)"
+                );
+                return Ok(message); // Return the message but don't add it
+            }
+
+            // Add to deduplication cache
+            let expires_at = Utc::now().timestamp() + 300; // Expires in 5 minutes
+            sqlx::query(
+                "INSERT OR REPLACE INTO deduplication_cache (queue_id, deduplication_id, expires_at) VALUES (?, ?, ?)"
+            )
+            .bind(queue_id)
+            .bind(&dedup_id)
+            .bind(expires_at)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::StorageError(format!("Failed to update deduplication cache: {}", e)))?;
+
+            // Get next sequence number
+            let sequence_number: i64 = sqlx::query_scalar(
+                "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM messages WHERE queue_id = ?"
+            )
+            .bind(queue_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| Error::StorageError(format!("Failed to get sequence number: {}", e)))?;
+
+            message.sequence_number = Some(sequence_number as u64);
+        }
+
+        // Calculate when message becomes visible
+        let delay = message.delay_seconds.unwrap_or(queue.delay_seconds);
+        let visible_at = (Utc::now() + Duration::seconds(delay as i64)).timestamp_millis();
+
+        // Serialize message attributes to JSON
+        let attributes_json = if message.attributes.is_empty() {
+            None
+        } else {
+            serde_json::to_string(&message.attributes).ok()
+        };
+
+        // Insert message
+        sqlx::query(
+            r#"
+            INSERT INTO messages (
+                id, queue_id, body, attributes, sent_timestamp, visible_at,
+                receive_count, message_group_id, deduplication_id, sequence_number,
+                delay_seconds, state
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'available')
+            "#
+        )
+        .bind(&message.id.0)
+        .bind(queue_id)
+        .bind(&message.body)
+        .bind(attributes_json)
+        .bind(message.sent_timestamp.timestamp_millis())
+        .bind(visible_at)
+        .bind(message.receive_count as i64)
+        .bind(&message.message_group_id)
+        .bind(&message.deduplication_id)
+        .bind(message.sequence_number.map(|n| n as i64))
+        .bind(delay as i64)
+        .execute(executor)
+        .await
+        .map_err(|e| Error::StorageError(format!("Failed to insert message: {}", e)))?;
+
+        info!(queue_id = %queue_id, message_id = %message.id, "Message sent to SQLite");
+        Ok(message)
     }
 }
 
@@ -246,28 +417,51 @@ impl StorageBackend for SqliteBackend {
     ) -> Result<Vec<QueueConfig>> {
         debug!("Listing queues from SQLite");
 
-        let mut query_str = String::from(
-            r#"
-            SELECT id, name, queue_type, visibility_timeout, message_retention_period,
-                   max_message_size, delay_seconds, content_based_deduplication,
-                   dlq_config, tags
-            FROM queues
-            "#,
-        );
-
-        // Add filter conditions if provided
-        if let Some(ref f) = filter {
+        let rows = if let Some(ref f) = filter {
             if let Some(ref prefix) = f.name_prefix {
-                query_str.push_str(&format!(" WHERE name LIKE '{}%'", prefix));
+                // Use parameterized query to prevent SQL injection
+                sqlx::query(
+                    r#"
+                    SELECT id, name, queue_type, visibility_timeout, message_retention_period,
+                           max_message_size, delay_seconds, content_based_deduplication,
+                           dlq_config, tags
+                    FROM queues
+                    WHERE name LIKE ? || '%'
+                    ORDER BY name
+                    "#
+                )
+                .bind(prefix)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| Error::StorageError(format!("Failed to list queues: {}", e)))?
+            } else {
+                sqlx::query(
+                    r#"
+                    SELECT id, name, queue_type, visibility_timeout, message_retention_period,
+                           max_message_size, delay_seconds, content_based_deduplication,
+                           dlq_config, tags
+                    FROM queues
+                    ORDER BY name
+                    "#
+                )
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| Error::StorageError(format!("Failed to list queues: {}", e)))?
             }
-        }
-
-        query_str.push_str(" ORDER BY name");
-
-        let rows = sqlx::query(&query_str)
+        } else {
+            sqlx::query(
+                r#"
+                SELECT id, name, queue_type, visibility_timeout, message_retention_period,
+                       max_message_size, delay_seconds, content_based_deduplication,
+                       dlq_config, tags
+                FROM queues
+                ORDER BY name
+                "#
+            )
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| Error::StorageError(format!("Failed to list queues: {}", e)))?;
+            .map_err(|e| Error::StorageError(format!("Failed to list queues: {}", e)))?
+        };
 
         let mut queues = Vec::new();
         for row in rows {
@@ -353,122 +547,31 @@ impl StorageBackend for SqliteBackend {
     }
 
     // TODO: Implement remaining methods (send_message, receive_messages, etc.)
-    async fn send_message(&self, queue_id: &str, mut message: Message) -> Result<Message> {
+
+    async fn send_message(&self, queue_id: &str, message: Message) -> Result<Message> {
         debug!(queue_id = %queue_id, message_id = %message.id, "Sending message to SQLite");
-
-        // Get queue config to check FIFO settings
-        let queue = self.get_queue(queue_id).await?;
-
-        // Handle FIFO deduplication
-        if queue.queue_type == QueueType::SqsFifo {
-            let dedup_id = if let Some(ref id) = message.deduplication_id {
-                id.clone()
-            } else if queue.content_based_deduplication {
-                // Generate content-based dedup ID (SHA256 of body)
-                use sha2::{Digest, Sha256};
-                let mut hasher = Sha256::new();
-                hasher.update(message.body.as_bytes());
-                format!("{:x}", hasher.finalize())
-            } else {
-                return Err(Error::Validation(
-                    crate::error::ValidationError::InvalidParameter {
-                        name: "MessageDeduplicationId".to_string(),
-                        reason: "Required for FIFO queues without content-based deduplication"
-                            .to_string(),
-                    },
-                ));
-            };
-
-            // Check deduplication cache (5 minute window)
-            let cutoff = Utc::now().timestamp() - 300; // 5 minutes ago
-            let cached = sqlx::query(
-                "SELECT expires_at FROM deduplication_cache WHERE queue_id = ? AND deduplication_id = ? AND expires_at > ?"
-            )
-            .bind(queue_id)
-            .bind(&dedup_id)
-            .bind(cutoff)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| Error::StorageError(format!("Failed to check deduplication: {}", e)))?;
-
-            if cached.is_some() {
-                debug!(
-                    queue_id = %queue_id,
-                    dedup_id = %dedup_id,
-                    "Message deduplicated (already sent within 5 minutes)"
-                );
-                return Ok(message); // Return the message but don't add it
-            }
-
-            // Add to deduplication cache
-            let expires_at = Utc::now().timestamp() + 300; // Expires in 5 minutes
-            sqlx::query(
-                "INSERT OR REPLACE INTO deduplication_cache (queue_id, deduplication_id, expires_at) VALUES (?, ?, ?)"
-            )
-            .bind(queue_id)
-            .bind(&dedup_id)
-            .bind(expires_at)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| Error::StorageError(format!("Failed to update deduplication cache: {}", e)))?;
-
-            // Get next sequence number
-            let sequence_number: i64 = sqlx::query_scalar(
-                "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM messages WHERE queue_id = ?"
-            )
-            .bind(queue_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| Error::StorageError(format!("Failed to get sequence number: {}", e)))?;
-
-            message.sequence_number = Some(sequence_number as u64);
-        }
-
-        // Calculate when message becomes visible
-        let delay = message.delay_seconds.unwrap_or(queue.delay_seconds);
-        let visible_at = (Utc::now() + Duration::seconds(delay as i64)).timestamp_millis();
-
-        // Serialize message attributes to JSON
-        let attributes_json = if message.attributes.is_empty() {
-            None
-        } else {
-            serde_json::to_string(&message.attributes).ok()
-        };
-
-        // Insert message
-        sqlx::query(
-            r#"
-            INSERT INTO messages (
-                id, queue_id, body, attributes, sent_timestamp, visible_at,
-                receive_count, message_group_id, deduplication_id, sequence_number,
-                delay_seconds, state
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'available')
-            "#
-        )
-        .bind(&message.id.0)
-        .bind(queue_id)
-        .bind(&message.body)
-        .bind(attributes_json)
-        .bind(message.sent_timestamp.timestamp_millis())
-        .bind(visible_at)
-        .bind(message.receive_count as i64)
-        .bind(&message.message_group_id)
-        .bind(&message.deduplication_id)
-        .bind(message.sequence_number.map(|n| n as i64))
-        .bind(delay as i64)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| Error::StorageError(format!("Failed to insert message: {}", e)))?;
-
-        info!(queue_id = %queue_id, message_id = %message.id, "Message sent to SQLite");
-        Ok(message)
+        self.send_message_impl(&self.pool, queue_id, message).await
     }
 
     async fn send_messages(&self, queue_id: &str, messages: Vec<Message>) -> Result<Vec<Message>> {
+        debug!(queue_id = %queue_id, message_count = messages.len(), "Sending batch of messages to SQLite");
+
+        // Start a transaction for atomicity
+        let mut tx = self.pool.begin().await
+            .map_err(|e| Error::StorageError(format!("Failed to begin transaction: {}", e)))?;
+
         let mut results = Vec::new();
         for message in messages {
-            results.push(self.send_message(queue_id, message).await?);
+            // Send each message within the transaction
+            let result = self.send_message_impl(&mut *tx, queue_id, message).await?;
+            results.push(result);
         }
+
+        // Commit transaction - all messages succeed or all fail
+        tx.commit().await
+            .map_err(|e| Error::StorageError(format!("Failed to commit transaction: {}", e)))?;
+
+        info!(queue_id = %queue_id, message_count = results.len(), "Batch messages sent to SQLite");
         Ok(results)
     }
 

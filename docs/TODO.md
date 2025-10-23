@@ -349,8 +349,9 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 - [x] Implement maintenance operations
   - [x] `purge_queue` - delete all messages for queue
   - [x] `get_stats` - aggregate statistics
-  - [ ] `process_expired_visibility` - find and reset expired
-  - [ ] Background cleanup of deduplication cache
+  - [x] `process_expired_visibility` - find and reset expired
+  - [x] Background cleanup of deduplication cache
+  - [x] CleanupManager for automatic background maintenance
 
 ### 3.3 Migration System
 - [x] Implement migration framework
@@ -635,6 +636,13 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [ ] Startup time <100ms
 
 ### 7.3 Security Hardening
+- [x] **Critical security fixes (Phase 3 hardening)**
+  - [x] Fix SQL injection vulnerabilities in list_queues
+  - [x] Add HMAC-SHA256 signatures to receipt handles
+  - [x] Implement constant-time signature verification
+  - [x] Wrap batch operations in database transactions
+  - [x] Add receipt handle forgery protection
+  - [x] Prevent timing attacks on signature verification
 - [ ] Implement optional TLS support
   - [ ] TLS configuration in config file
   - [ ] Certificate loading
@@ -644,10 +652,10 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [ ] API key authentication
   - [ ] Token-based authentication
   - [ ] AWS Signature V4 verification
-- [ ] Input validation
-  - [ ] Review all validation functions
+- [x] Input validation
+  - [x] Review all validation functions
   - [ ] Add fuzzing tests
-  - [ ] Prevent injection attacks
+  - [x] Prevent injection attacks (SQL injection fixed)
   - [ ] Limit request sizes
 
 ### 7.4 Docker and Container Support

@@ -122,7 +122,7 @@ impl InMemoryBackend {
 
         match self.inner.config.eviction_policy {
             EvictionPolicy::RejectNew => {
-                return Err(Error::Storage(
+                return Err(Error::StorageError(
                     "Message storage is full, rejecting new messages".to_string(),
                 ));
             }
@@ -229,7 +229,7 @@ impl StorageBackend for InMemoryBackend {
         let mut queues = self.inner.queues.write().await;
 
         if queues.contains_key(&config.id) {
-            return Err(Error::Storage(format!("Queue {} already exists", config.id)));
+            return Err(Error::StorageError(format!("Queue {} already exists", config.id)));
         }
 
         let queue_data = QueueData {
@@ -618,7 +618,7 @@ impl StorageBackend for InMemoryBackend {
         let mut subscriptions = self.inner.subscriptions.write().await;
 
         if subscriptions.contains_key(&config.id) {
-            return Err(Error::Storage(format!(
+            return Err(Error::StorageError(format!(
                 "Subscription {} already exists",
                 config.id
             )));
