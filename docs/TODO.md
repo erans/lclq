@@ -139,13 +139,13 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] LRU (Least Recently Used)
   - [x] FIFO (First In First Out)
   - [x] RejectNew (reject when full)
-- [ ] Add tests for in-memory backend
-  - [ ] Test basic send/receive flow
-  - [ ] Test FIFO ordering
-  - [ ] Test deduplication
-  - [ ] Test visibility timeout expiration
-  - [ ] Test concurrent access
-  - [ ] Test capacity limits and eviction
+- [x] Add tests for in-memory backend ✅ COMPLETE
+  - [x] Test basic send/receive flow
+  - [x] Test FIFO ordering
+  - [x] Test deduplication
+  - [x] Test visibility timeout expiration
+  - [x] Test concurrent access
+  - [x] Test capacity limits and eviction
 
 ### 1.4 Core Queue Engine
 - [ ] Implement `MessageRouter` in `src/core/router.rs`
@@ -490,10 +490,145 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Error handling and status codes
   - [x] Logging and tracing
   - [x] Integrated into main application (port 8085)
-- [ ] Advanced streaming support
-  - [ ] StreamingPull bidirectional stream (stub implemented)
+- [ ] Advanced streaming support (StreamingPull)
+  - [ ] StreamingPull bidirectional stream (stub implemented - needs full implementation)
   - [ ] Flow control for streaming
   - [ ] Heartbeat mechanism
+
+### 4.8 StreamingPull Implementation (Future Enhancement)
+**Status:** Stub exists, full implementation pending
+**Priority:** Medium (nice-to-have for advanced use cases)
+
+#### 4.8.1 Core StreamingPull Logic
+- [ ] Replace stub with full bidirectional stream handler in `src/pubsub/subscriber.rs`
+  - [ ] Implement `streaming_pull` method with proper stream handling
+  - [ ] Handle incoming `StreamingPullRequest` stream from client
+  - [ ] Send outgoing `StreamingPullResponse` stream to client
+  - [ ] Maintain stream state per connection
+  - [ ] Handle graceful stream closure
+  - [ ] Handle abrupt disconnections
+
+#### 4.8.2 Request Processing
+- [ ] Parse and handle `StreamingPullRequest` messages
+  - [ ] Extract and validate `subscription` field
+  - [ ] Process `ack_ids` for acknowledging messages
+  - [ ] Process `modify_deadline_seconds` for deadline extensions
+  - [ ] Process `modify_deadline_ack_ids` for specific message deadlines
+  - [ ] Handle `client_id` for connection tracking
+  - [ ] Handle `max_outstanding_messages` for flow control
+  - [ ] Handle `max_outstanding_bytes` for flow control
+  - [ ] Handle `stream_ack_deadline_seconds` for stream-level deadline
+
+#### 4.8.3 Response Streaming
+- [ ] Implement continuous message streaming
+  - [ ] Create background task to poll subscription for new messages
+  - [ ] Send `StreamingPullResponse` with `received_messages`
+  - [ ] Batch messages efficiently (respect max_outstanding limits)
+  - [ ] Handle empty responses (no messages available)
+  - [ ] Implement backpressure when client limits reached
+  - [ ] Track which messages are in-flight per stream
+
+#### 4.8.4 Flow Control
+- [ ] Implement client-specified flow control
+  - [ ] Track outstanding message count per stream
+  - [ ] Track outstanding bytes per stream
+  - [ ] Block sending when `max_outstanding_messages` reached
+  - [ ] Block sending when `max_outstanding_bytes` reached
+  - [ ] Resume sending when client acknowledges messages
+  - [ ] Default limits if not specified by client
+
+#### 4.8.5 Stream Connection Management
+- [ ] Track active streaming connections
+  - [ ] Create `StreamConnection` struct with connection state
+  - [ ] Store connection metadata (client_id, subscription_id)
+  - [ ] Maintain map of active streams in subscriber service
+  - [ ] Clean up on disconnect (return messages to available state)
+  - [ ] Handle connection lease renewal
+  - [ ] Implement connection timeout/heartbeat
+
+#### 4.8.6 Message Lease Management
+- [ ] Implement streaming-specific message leasing
+  - [ ] Lock messages when sent via stream
+  - [ ] Track message lease per connection
+  - [ ] Extend lease based on `stream_ack_deadline_seconds`
+  - [ ] Release lease on acknowledgment
+  - [ ] Release lease on disconnect (make available for other clients)
+  - [ ] Implement lease expiration and redelivery
+
+#### 4.8.7 Heartbeat & Keep-Alive
+- [ ] Implement heartbeat mechanism
+  - [ ] Send periodic empty responses to detect dead connections
+  - [ ] Client should respond with empty requests
+  - [ ] Detect connection failure (no response to heartbeat)
+  - [ ] Configure heartbeat interval (default: 30 seconds)
+  - [ ] Close stream if heartbeat fails
+
+#### 4.8.8 Error Handling
+- [ ] Handle stream errors gracefully
+  - [ ] Invalid subscription errors
+  - [ ] Client exceeding flow control limits
+  - [ ] Malformed requests
+  - [ ] Backend errors (storage failures)
+  - [ ] Network errors and retries
+  - [ ] Return proper gRPC status codes
+
+#### 4.8.9 Concurrency & Thread Safety
+- [ ] Ensure thread-safe stream handling
+  - [ ] Use tokio channels for message passing
+  - [ ] Use Arc/RwLock for shared stream state
+  - [ ] Handle concurrent acknowledgments
+  - [ ] Handle concurrent deadline modifications
+  - [ ] Prevent race conditions in message delivery
+
+#### 4.8.10 Integration with Storage Backend
+- [ ] Extend storage backend for streaming support
+  - [ ] Add method to subscribe to new messages (watch pattern)
+  - [ ] Implement efficient polling or notification mechanism
+  - [ ] Consider using tokio::sync::watch or broadcast channels
+  - [ ] Optimize for low latency message delivery
+  - [ ] Batch fetch messages efficiently
+
+#### 4.8.11 Testing
+- [ ] Unit tests for StreamingPull
+  - [ ] Test basic streaming flow (send/receive/ack)
+  - [ ] Test acknowledgments via stream
+  - [ ] Test deadline modifications via stream
+  - [ ] Test flow control limits
+  - [ ] Test stream closure scenarios
+  - [ ] Test error conditions
+- [ ] Integration tests
+  - [ ] Test with google-cloud-pubsub Python SDK (streaming subscriber)
+  - [ ] Test with @google-cloud/pubsub Node.js SDK (streaming)
+  - [ ] Test concurrent streaming clients
+  - [ ] Test connection drops and recovery
+  - [ ] Test message redelivery after disconnect
+  - [ ] Test long-running streams (hours)
+
+#### 4.8.12 Performance & Optimization
+- [ ] Optimize streaming performance
+  - [ ] Profile message delivery latency
+  - [ ] Minimize allocations in hot path
+  - [ ] Batch operations where possible
+  - [ ] Tune flow control defaults
+  - [ ] Benchmark throughput vs. synchronous Pull
+  - [ ] Memory usage profiling
+
+#### 4.8.13 Documentation
+- [ ] Document StreamingPull usage
+  - [ ] Add examples to docs/quickstart.md
+  - [ ] Document flow control parameters
+  - [ ] Document heartbeat behavior
+  - [ ] Add troubleshooting guide
+  - [ ] Update API reference
+  - [ ] Add comparison: StreamingPull vs. Pull
+
+**Estimated Effort:** 2-3 weeks
+**Dependencies:** None (can be implemented independently)
+**Benefits:**
+- Lower latency for message delivery
+- More efficient for high-throughput scenarios
+- Better resource utilization (persistent connections)
+- Closer parity with production Pub/Sub behavior
 
 ### 4.7 Pub/Sub gRPC Integration Tests ✅
 - [x] Create integration test suite
@@ -783,27 +918,39 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 ## Testing
 
 ### Unit Tests
-- [ ] Test coverage for all modules
-  - [ ] Target >90% coverage
-  - [ ] Use cargo-tarpaulin to measure
-- [ ] Core module tests
+- [x] Test coverage for all modules ✅ IN PROGRESS (28.27% → target 90%)
+  - [x] Use cargo-tarpaulin to measure
+  - [ ] Target >90% coverage (current: 28.27%)
+- [x] Core module tests ✅ PARTIAL
   - [ ] Message router tests
-  - [ ] Visibility manager tests
-  - [ ] DLQ handler tests
-- [ ] Storage backend tests
-  - [ ] In-memory backend tests
-  - [ ] SQLite backend tests
-  - [ ] Test all CRUD operations
-  - [ ] Test concurrent access
-- [ ] Validation function tests
-  - [ ] Queue name validation
-  - [ ] Topic name validation
-  - [ ] Message size validation
-  - [ ] Attribute validation
+  - [x] Visibility manager tests (3/21 lines)
+  - [x] DLQ handler tests (7/27 lines)
+- [x] Storage backend tests ✅ COMPLETE
+  - [x] In-memory backend tests (7 comprehensive tests, 174/285 lines - 61%)
+  - [x] SQLite backend tests (5 comprehensive tests, 303/448 lines - 68%)
+  - [x] Test all CRUD operations
+  - [x] Test concurrent access
+- [x] Validation function tests ✅ PARTIAL (35/56 lines)
+  - [x] Queue name validation
+  - [x] Topic name validation
+  - [x] Message size validation
+  - [x] Attribute validation
 - [ ] Configuration tests
   - [ ] TOML parsing tests
   - [ ] Default configuration tests
   - [ ] Validation tests
+- [x] SQS handler tests ✅ COMPLETE (16 tests, 250/810 lines - 31%)
+  - [x] CreateQueue (standard & FIFO)
+  - [x] GetQueueUrl
+  - [x] DeleteQueue
+  - [x] ListQueues (with prefix filtering)
+  - [x] SendMessage (basic & with attributes)
+  - [x] SendMessageBatch
+  - [x] ReceiveMessage
+  - [x] DeleteMessage
+  - [x] PurgeQueue
+  - [x] GetQueueAttributes
+  - [x] SetQueueAttributes
 
 ### Integration Tests
 - [ ] SQS integration tests
