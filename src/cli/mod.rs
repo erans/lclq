@@ -29,6 +29,10 @@ pub enum Commands {
         #[arg(long, env = "LCLQ_PUBSUB_PORT", default_value = "8085")]
         pubsub_port: u16,
 
+        /// Pub/Sub REST port
+        #[arg(long, env = "LCLQ_PUBSUB_REST_PORT", default_value = "8086")]
+        pubsub_rest_port: u16,
+
         /// Admin API port
         #[arg(long, env = "LCLQ_ADMIN_PORT", default_value = "9000")]
         admin_port: u16,
@@ -48,6 +52,14 @@ pub enum Commands {
         /// SQLite database path (only used with sqlite backend)
         #[arg(long, env = "LCLQ_DB_PATH", default_value = "lclq.db")]
         db_path: String,
+
+        /// Disable SQS server
+        #[arg(long, env = "LCLQ_DISABLE_SQS")]
+        disable_sqs: bool,
+
+        /// Disable Pub/Sub servers (gRPC and REST)
+        #[arg(long, env = "LCLQ_DISABLE_PUBSUB")]
+        disable_pubsub: bool,
     },
 
     /// Queue management commands

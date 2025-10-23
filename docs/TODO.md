@@ -527,56 +527,67 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 
 ---
 
-## Phase 5: GCP Pub/Sub HTTP/REST (Week 8) 🚧 IN PROGRESS
+## Phase 5: GCP Pub/Sub HTTP/REST (Week 8) ✅ COMPLETE
 
-### 5.1 REST API Implementation ✅ INFRASTRUCTURE COMPLETE
-- [x] **Create REST API infrastructure in `src/pubsub/rest.rs`** (560 lines)
+### 5.1 REST API Implementation ✅ COMPLETE
+- [x] **Create REST API infrastructure in `src/pubsub/rest.rs`** (~1030 lines)
   - [x] Route configuration with Axum (all 11 endpoints)
   - [x] JSON request/response handling with serde
   - [x] Complete type definitions (Topic, Subscription, Message, etc.)
   - [x] Error formatting (Google Cloud error format)
   - [x] Base64 encoding/decoding for message data
   - [x] Graceful shutdown support
-  - [x] Placeholder handlers (return NOT_IMPLEMENTED)
-  - [ ] Implement actual handler logic (pending)
+  - [x] Fixed Axum 0.8 route syntax (`:param` → `{param}`)
+  - [x] Fixed route conflicts with action handlers
+  - [x] Optional name fields for SDK compatibility
 
-### 5.2 REST Endpoints - Topics
-- [ ] Implement topic endpoint handlers
-  - [ ] `PUT /v1/projects/{project}/topics/{topic}` - create topic
-  - [ ] `GET /v1/projects/{project}/topics/{topic}` - get topic
-  - [ ] `DELETE /v1/projects/{project}/topics/{topic}` - delete topic
-  - [ ] `GET /v1/projects/{project}/topics` - list topics
-  - [ ] `POST /v1/projects/{project}/topics/{topic}:publish` - publish messages
+### 5.2 REST Endpoints - Topics ✅ COMPLETE
+- [x] Implement topic endpoint handlers
+  - [x] `PUT /v1/projects/{project}/topics/{topic}` - create topic
+  - [x] `GET /v1/projects/{project}/topics/{topic}` - get topic
+  - [x] `DELETE /v1/projects/{project}/topics/{topic}` - delete topic
+  - [x] `GET /v1/projects/{project}/topics` - list topics
+  - [x] `POST /v1/projects/{project}/topics/{topic}:publish` - publish messages
 
-### 5.3 REST Endpoints - Subscriptions
-- [ ] Implement subscription endpoint handlers
-  - [ ] `PUT /v1/projects/{project}/subscriptions/{subscription}` - create subscription
-  - [ ] `GET /v1/projects/{project}/subscriptions/{subscription}` - get subscription
-  - [ ] `DELETE /v1/projects/{project}/subscriptions/{subscription}` - delete subscription
-  - [ ] `GET /v1/projects/{project}/subscriptions` - list subscriptions
-  - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:pull` - pull messages
-  - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:acknowledge` - ack messages
-  - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:modifyAckDeadline` - modify deadline
-  - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:modifyPushConfig` - modify push config (stub)
-  - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:seek` - seek subscription (stub)
+### 5.3 REST Endpoints - Subscriptions ✅ COMPLETE
+- [x] Implement subscription endpoint handlers
+  - [x] `PUT /v1/projects/{project}/subscriptions/{subscription}` - create subscription
+  - [x] `GET /v1/projects/{project}/subscriptions/{subscription}` - get subscription
+  - [x] `DELETE /v1/projects/{project}/subscriptions/{subscription}` - delete subscription
+  - [x] `GET /v1/projects/{project}/subscriptions` - list subscriptions
+  - [x] `POST /v1/projects/{project}/subscriptions/{subscription}:pull` - pull messages
+  - [x] `POST /v1/projects/{project}/subscriptions/{subscription}:acknowledge` - ack messages
+  - [x] `POST /v1/projects/{project}/subscriptions/{subscription}:modifyAckDeadline` - modify deadline
+  - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:modifyPushConfig` - modify push config (future)
+  - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:seek` - seek subscription (future)
 
 ### 5.4 Push Subscription Support
-- [ ] Implement push delivery in `src/pubsub/push.rs`
+- [ ] Implement push delivery in `src/pubsub/push.rs` (deferred to future phase)
   - [ ] HTTP client for pushing to endpoints
   - [ ] Push configuration validation (HTTPS required)
   - [ ] Retry logic with exponential backoff
   - [ ] Push authentication (optional)
   - [ ] Background push worker task
 
-### 5.5 HTTP/REST Integration Tests
-- [ ] Test HTTP REST API with real SDKs
-  - [ ] Test with Python SDK using HTTP transport
-  - [ ] Test with Node.js SDK using HTTP transport
-- [ ] Verify feature parity with gRPC
-  - [ ] All operations work identically
-  - [ ] Same error handling
-  - [ ] Same message format
-- [ ] Test push subscriptions
+### 5.5 HTTP/REST Integration Tests ✅ COMPLETE (Python)
+- [x] Test HTTP REST API with real SDKs
+  - [x] Test with Python SDK using HTTP transport - **9/9 tests passing**
+  - [ ] Test with Node.js SDK using HTTP transport (pending)
+- [x] Verify feature parity with gRPC
+  - [x] All core operations work identically
+  - [x] Same error handling
+  - [x] Same message format
+- [x] Python SDK test scenarios (google-cloud-pubsub v2.23.0 with REST transport)
+  - [x] Create and get topic
+  - [x] List topics
+  - [x] Publish and pull messages
+  - [x] Create and get subscription
+  - [x] List subscriptions
+  - [x] Modify ack deadline
+  - [x] Message ordering
+  - [x] Empty pull handling
+  - [x] Batch publish operations
+- [ ] Test push subscriptions (deferred to future phase)
   - [ ] Set up test HTTP server to receive pushes
   - [ ] Verify message delivery
   - [ ] Test retry behavior

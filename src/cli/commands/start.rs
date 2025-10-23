@@ -8,6 +8,7 @@ use tracing::info;
 use crate::config::LclqConfig;
 use crate::core::cleanup::CleanupManager;
 use crate::pubsub::grpc_server::{start_grpc_server, GrpcServerConfig};
+use crate::pubsub::rest::{start_rest_server, RestServerConfig};
 use crate::server::admin::start_admin_server;
 use crate::server::metrics::start_metrics_server;
 use crate::server::shutdown::{shutdown_with_timeout, ShutdownSignal};
@@ -17,16 +18,25 @@ use crate::storage::sqlite::{SqliteBackend, SqliteConfig};
 use crate::storage::StorageBackend;
 
 /// Execute the start command - launches the lclq server with all services
+#[allow(clippy::too_many_arguments)]
 pub async fn execute(
     sqs_port: u16,
     pubsub_port: u16,
+    pubsub_rest_port: u16,
     admin_port: u16,
     metrics_port: u16,
     bind_address: String,
     backend: String,
     db_path: String,
+    disable_sqs: bool,
+    disable_pubsub: bool,
 ) -> Result<()> {
     info!("Starting lclq - Local Cloud Queue");
+
+    // Check if both services are disabled
+    if disable_sqs && disable_pubsub {
+        anyhow::bail!("Cannot start lclq with both SQS and Pub/Sub disabled. Enable at least one service.");
+    }
 
     // Load configuration
     let mut config = LclqConfig::default();
@@ -37,8 +47,17 @@ pub async fn execute(
     config.server.bind_address = bind_address.clone();
 
     info!("Configuration loaded successfully");
-    info!("SQS port: {}", config.server.sqs_port);
-    info!("Pub/Sub port: {}", pubsub_port);
+    if !disable_sqs {
+        info!("SQS port: {}", config.server.sqs_port);
+    } else {
+        info!("SQS: disabled");
+    }
+    if !disable_pubsub {
+        info!("Pub/Sub gRPC port: {}", pubsub_port);
+        info!("Pub/Sub REST port: {}", pubsub_rest_port);
+    } else {
+        info!("Pub/Sub: disabled");
+    }
     info!("Admin port: {}", config.server.admin_port);
     info!("Metrics port: {}", metrics_port);
     info!("Bind address: {}", config.server.bind_address);
@@ -83,7 +102,11 @@ pub async fn execute(
     // Clone backend for servers
     let admin_backend = storage_backend.clone();
     let sqs_backend = storage_backend.clone();
-    let pubsub_backend = storage_backend.clone();
+    let pubsub_grpc_backend = storage_backend.clone();
+    let pubsub_rest_backend = storage_backend.clone();
+
+    // Collect all server handles
+    let mut server_handles = Vec::new();
 
     // Start Admin API server in background
     let admin_shutdown_rx = shutdown_signal.subscribe();
@@ -93,6 +116,7 @@ pub async fn execute(
             tracing::error!("Admin API server error: {}", e);
         }
     });
+    server_handles.push(admin_handle);
 
     // Start Metrics server in background
     let metrics_shutdown_rx = shutdown_signal.subscribe();
@@ -102,34 +126,57 @@ pub async fn execute(
             tracing::error!("Metrics server error: {}", e);
         }
     });
+    server_handles.push(metrics_handle);
 
-    // Start SQS server in background
-    let sqs_shutdown_rx = shutdown_signal.subscribe();
-    let sqs_handle = tokio::spawn(async move {
-        if let Err(e) = start_sqs_server(sqs_backend, config, sqs_shutdown_rx).await {
-            tracing::error!("SQS HTTP server error: {}", e);
-        }
-    });
+    // Conditionally start SQS server
+    if !disable_sqs {
+        let sqs_shutdown_rx = shutdown_signal.subscribe();
+        let sqs_handle = tokio::spawn(async move {
+            if let Err(e) = start_sqs_server(sqs_backend, config, sqs_shutdown_rx).await {
+                tracing::error!("SQS HTTP server error: {}", e);
+            }
+        });
+        server_handles.push(sqs_handle);
+    }
 
-    // Start Pub/Sub gRPC server in background
-    let pubsub_shutdown_rx = shutdown_signal.subscribe();
-    let pubsub_bind_address = bind_address.clone();
-    let pubsub_handle = tokio::spawn(async move {
-        let grpc_config = GrpcServerConfig {
-            bind_address: format!("{}:{}", pubsub_bind_address, pubsub_port),
-        };
-        if let Err(e) = start_grpc_server(grpc_config, pubsub_backend, pubsub_shutdown_rx).await {
-            tracing::error!("Pub/Sub gRPC server error: {}", e);
-        }
-    });
+    // Conditionally start Pub/Sub servers
+    if !disable_pubsub {
+        // Start Pub/Sub gRPC server in background
+        let pubsub_grpc_shutdown_rx = shutdown_signal.subscribe();
+        let pubsub_grpc_bind_address = bind_address.clone();
+        let pubsub_grpc_handle = tokio::spawn(async move {
+            let grpc_config = GrpcServerConfig {
+                bind_address: format!("{}:{}", pubsub_grpc_bind_address, pubsub_port),
+            };
+            if let Err(e) = start_grpc_server(grpc_config, pubsub_grpc_backend, pubsub_grpc_shutdown_rx).await {
+                tracing::error!("Pub/Sub gRPC server error: {}", e);
+            }
+        });
+        server_handles.push(pubsub_grpc_handle);
 
-    info!("All servers started successfully");
+        // Start Pub/Sub REST server in background
+        let pubsub_rest_shutdown_rx = shutdown_signal.subscribe();
+        let pubsub_rest_bind_address = bind_address.clone();
+        let pubsub_rest_handle = tokio::spawn(async move {
+            let rest_config = RestServerConfig {
+                bind_address: format!("{}:{}", pubsub_rest_bind_address, pubsub_rest_port),
+            };
+            if let Err(e) = start_rest_server(rest_config, pubsub_rest_backend, pubsub_rest_shutdown_rx).await {
+                tracing::error!("Pub/Sub REST server error: {}", e);
+            }
+        });
+        server_handles.push(pubsub_rest_handle);
+    }
+
+    info!("All enabled servers started successfully");
 
     // Wait for shutdown signal and coordinate graceful shutdown
     shutdown_with_timeout(shutdown_signal, Duration::from_secs(30)).await?;
 
     // Wait for all servers to complete shutdown
-    let _ = tokio::join!(admin_handle, metrics_handle, sqs_handle, pubsub_handle);
+    for handle in server_handles {
+        let _ = handle.await;
+    }
 
     info!("All servers shut down. Exiting.");
     Ok(())
