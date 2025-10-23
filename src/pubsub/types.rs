@@ -7,14 +7,26 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResourceName {
     /// Topic resource: projects/{project}/topics/{topic}
-    Topic { project: String, topic: String },
+    Topic {
+        /// The GCP project ID
+        project: String,
+        /// The topic name
+        topic: String,
+    },
     /// Subscription resource: projects/{project}/subscriptions/{subscription}
     Subscription {
+        /// The GCP project ID
         project: String,
+        /// The subscription name
         subscription: String,
     },
     /// Snapshot resource: projects/{project}/snapshots/{snapshot}
-    Snapshot { project: String, snapshot: String },
+    Snapshot {
+        /// The GCP project ID
+        project: String,
+        /// The snapshot name
+        snapshot: String,
+    },
 }
 
 impl ResourceName {

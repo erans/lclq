@@ -59,7 +59,7 @@ impl PublisherService {
 
     /// Convert our internal QueueConfig to proto Topic.
     fn queue_config_to_topic(config: &QueueConfig) -> Topic {
-        let mut topic = Topic {
+        Topic {
             name: config.name.clone(),
             labels: config.tags.clone(),
             message_storage_policy: None,
@@ -70,9 +70,7 @@ impl PublisherService {
                 seconds: config.message_retention_period as i64,
                 nanos: 0,
             }),
-        };
-
-        topic
+        }
     }
 
     /// Convert proto PubsubMessage to our internal Message.
@@ -249,6 +247,11 @@ impl Publisher for PublisherService {
         let req = request.into_inner();
         debug!("ListTopics: project={}", req.project);
 
+        // Extract project ID from "projects/{project}" format
+        let project_id = req.project
+            .strip_prefix("projects/")
+            .unwrap_or(&req.project);
+
         // List all queues and filter for Pub/Sub topics
         let configs = self
             .backend
@@ -262,7 +265,7 @@ impl Publisher for PublisherService {
             .filter(|c| {
                 // Filter by project
                 if let Ok(resource_name) = ResourceName::parse(&c.name) {
-                    resource_name.project() == req.project
+                    resource_name.project() == project_id
                 } else {
                     false
                 }

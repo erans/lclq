@@ -1,0 +1,16 @@
+{
+  "name": "lclq-pubsub-tests-js",
+  "version": "0.1.0",
+  "description": "JavaScript integration tests for lclq Pub/Sub implementation",
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:verbose": "node --experimental-vm-modules node_modules/jest/bin/jest.js --verbose"
+  },
+  "dependencies": {
+    "@google-cloud/pubsub": "^4.9.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}

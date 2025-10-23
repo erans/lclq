@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "lclq-pubsub-tests"
+version = "0.1.0"
+description = "Integration tests for lclq Pub/Sub implementation"
+authors = ["lclq Contributors"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+google-cloud-pubsub = "^2.23.0"
+pytest = "^8.0.0"
+pytest-asyncio = "^0.24.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

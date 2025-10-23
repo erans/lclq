@@ -82,7 +82,7 @@ impl SubscriberService {
     fn config_to_subscription(config: &SubscriptionConfig) -> Subscription {
         // Parse the subscription name to get project and subscription ID
         let parts: Vec<&str> = config.id.split(':').collect();
-        let (project, sub_id) = if parts.len() == 2 {
+        let (project, _sub_id) = if parts.len() == 2 {
             (parts[0], parts[1])
         } else {
             ("default", config.id.as_str())
@@ -222,6 +222,11 @@ impl Subscriber for SubscriberService {
         let req = request.into_inner();
         debug!("ListSubscriptions: project={}", req.project);
 
+        // Extract project ID from "projects/{project}" format
+        let project_id = req.project
+            .strip_prefix("projects/")
+            .unwrap_or(&req.project);
+
         // List all subscriptions
         let configs = self
             .backend
@@ -234,7 +239,7 @@ impl Subscriber for SubscriberService {
             .iter()
             .filter(|c| {
                 if let Ok(resource_name) = ResourceName::parse(&c.name) {
-                    resource_name.project() == req.project
+                    resource_name.project() == project_id
                 } else {
                     false
                 }
@@ -294,16 +299,23 @@ impl Subscriber for SubscriberService {
             Status::invalid_argument(format!("Invalid subscription name: {}", e))
         })?;
 
-        let topic_id = format!(
+        let sub_id = format!(
             "{}:{}",
             resource_name.project(),
             resource_name.resource_id()
         );
 
+        // Get subscription config to find topic
+        let config = self
+            .backend
+            .get_subscription(&sub_id)
+            .await
+            .map_err(|_| Status::not_found(format!("Subscription not found: {}", req.subscription)))?;
+
         // Modify visibility for each ack_id (receipt handle)
         for ack_id in &req.ack_ids {
             self.backend
-                .change_visibility(&topic_id, ack_id, req.ack_deadline_seconds as u32)
+                .change_visibility(&config.topic_id, ack_id, req.ack_deadline_seconds as u32)
                 .await
                 .map_err(|e| {
                     Status::internal(format!("Failed to modify ack deadline: {}", e))
