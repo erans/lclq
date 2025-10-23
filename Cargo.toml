@@ -79,3 +79,13 @@ signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+tokio-test = "0.4"
+
+[[bench]]
+name = "storage_benchmarks"
+harness = false
+
+[[bench]]
+name = "message_benchmarks"
+harness = false

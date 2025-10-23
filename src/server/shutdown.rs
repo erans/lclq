@@ -2,7 +2,7 @@
 use std::time::Duration;
 use tokio::signal;
 use tokio::sync::broadcast;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Shutdown signal broadcaster
 #[derive(Clone)]

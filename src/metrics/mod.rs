@@ -1,8 +1,15 @@
-///! Metrics and monitoring using Prometheus.
+//! Metrics and monitoring using Prometheus.
+//!
+//! This module provides Prometheus-compatible metrics for monitoring lclq performance.
+//! Metrics are exposed on the `/metrics` endpoint and include:
+//!
+//! - **Counters**: Total messages sent, received, deleted, moved to DLQ
+//! - **Histograms**: Latency distributions for send, receive, and API operations
+//! - **Gauges**: Current queue depth, in-flight messages, active connections
 
 use once_cell::sync::Lazy;
 use prometheus::{
-    CounterVec, Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts,
+    Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts,
     Registry, TextEncoder,
 };
 use std::sync::Arc;
@@ -22,23 +29,33 @@ pub static METRICS: Lazy<Arc<Metrics>> = Lazy::new(|| {
 
 /// Metrics collector for lclq
 pub struct Metrics {
-    // Counter metrics
+    /// Total messages sent to queues (counter)
     pub messages_sent_total: IntCounterVec,
+    /// Total messages received from queues (counter)
     pub messages_received_total: IntCounterVec,
+    /// Total messages deleted from queues (counter)
     pub messages_deleted_total: IntCounterVec,
+    /// Total messages moved to dead letter queues (counter)
     pub messages_to_dlq_total: IntCounterVec,
+    /// Total backend errors encountered (counter)
     pub backend_errors_total: IntCounterVec,
+    /// Total API requests received (counter)
     pub api_requests_total: IntCounterVec,
 
-    // Histogram metrics (for latencies)
+    /// Message send latency in seconds (histogram)
     pub send_latency_seconds: HistogramVec,
+    /// Message receive latency in seconds (histogram)
     pub receive_latency_seconds: HistogramVec,
+    /// API request latency in seconds (histogram)
     pub api_latency_seconds: HistogramVec,
 
-    // Gauge metrics
+    /// Current queue depth (number of available messages) (gauge)
     pub queue_depth: IntGaugeVec,
+    /// Current number of in-flight messages (gauge)
     pub in_flight_messages: IntGaugeVec,
+    /// Total number of queues (gauge)
     pub queue_count: IntGauge,
+    /// Number of active connections (gauge)
     pub active_connections: IntGaugeVec,
 }
 
