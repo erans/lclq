@@ -394,6 +394,62 @@ impl SqsRequest {
 
         entries
     }
+
+    /// Parse batch entries for ChangeMessageVisibilityBatch.
+    pub fn parse_change_visibility_batch_entries(&self) -> Vec<ChangeVisibilityBatchEntry> {
+        let mut entries = Vec::new();
+
+        // For JSON requests, Entries is a JSON array string
+        if let Some(entries_json) = self.get_param("Entries") {
+            // Try to parse as JSON array
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(entries_json) {
+                if let Some(arr) = json_value.as_array() {
+                    for entry in arr {
+                        if let (Some(id), Some(receipt_handle), Some(timeout)) = (
+                            entry["Id"].as_str(),
+                            entry["ReceiptHandle"].as_str(),
+                            entry["VisibilityTimeout"].as_u64(),
+                        ) {
+                            entries.push(ChangeVisibilityBatchEntry {
+                                id: id.to_string(),
+                                receipt_handle: receipt_handle.to_string(),
+                                visibility_timeout: timeout as u32,
+                            });
+                        }
+                    }
+                    return entries;
+                }
+            }
+        }
+
+        // For form-encoded requests
+        let mut index = 1;
+        loop {
+            let id_key = format!("ChangeMessageVisibilityBatchRequestEntry.{}.Id", index);
+            let handle_key = format!("ChangeMessageVisibilityBatchRequestEntry.{}.ReceiptHandle", index);
+            let timeout_key = format!("ChangeMessageVisibilityBatchRequestEntry.{}.VisibilityTimeout", index);
+
+            if let (Some(id), Some(handle), Some(timeout_str)) = (
+                self.get_param(&id_key),
+                self.get_param(&handle_key),
+                self.get_param(&timeout_key),
+            ) {
+                if let Ok(timeout) = timeout_str.parse::<u32>() {
+                    entries.push(ChangeVisibilityBatchEntry {
+                        id: id.to_string(),
+                        receipt_handle: handle.to_string(),
+                        visibility_timeout: timeout,
+                    });
+                }
+
+                index += 1;
+            } else {
+                break;
+            }
+        }
+
+        entries
+    }
 }
 
 /// Batch entry for SendMessageBatch.
@@ -418,6 +474,17 @@ pub struct DeleteMessageBatchEntry {
     pub id: String,
     /// Receipt handle.
     pub receipt_handle: String,
+}
+
+/// Batch entry for ChangeMessageVisibilityBatch.
+#[derive(Debug, Clone)]
+pub struct ChangeVisibilityBatchEntry {
+    /// Entry ID.
+    pub id: String,
+    /// Receipt handle.
+    pub receipt_handle: String,
+    /// Visibility timeout in seconds.
+    pub visibility_timeout: u32,
 }
 
 /// Parse form-encoded data into a HashMap.

@@ -189,6 +189,44 @@ pub fn build_delete_message_batch_response(
     xml
 }
 
+/// Build a ChangeMessageVisibilityBatch response.
+pub fn build_change_visibility_batch_response(
+    successful: &[String],  // Just IDs for successful changes
+    failed: &[BatchErrorEntry],
+) -> String {
+    let mut xml = String::new();
+    xml.push_str(r#"<?xml version="1.0"?>"#);
+    xml.push('\n');
+    xml.push_str(r#"<ChangeMessageVisibilityBatchResponse xmlns="http://queue.amazonaws.com/doc/2012-11-05/">"#);
+    xml.push('\n');
+    xml.push_str("  <ChangeMessageVisibilityBatchResult>\n");
+
+    // Add successful entries
+    for id in successful {
+        xml.push_str("    <ChangeMessageVisibilityBatchResultEntry>\n");
+        xml.push_str(&format!("      <Id>{}</Id>\n", escape_xml(id)));
+        xml.push_str("    </ChangeMessageVisibilityBatchResultEntry>\n");
+    }
+
+    // Add failed entries
+    for entry in failed {
+        xml.push_str("    <BatchResultErrorEntry>\n");
+        xml.push_str(&format!("      <Id>{}</Id>\n", escape_xml(&entry.id)));
+        xml.push_str(&format!("      <Code>{}</Code>\n", escape_xml(&entry.code)));
+        xml.push_str(&format!("      <Message>{}</Message>\n", escape_xml(&entry.message)));
+        xml.push_str(&format!("      <SenderFault>{}</SenderFault>\n", entry.sender_fault));
+        xml.push_str("    </BatchResultErrorEntry>\n");
+    }
+
+    xml.push_str("  </ChangeMessageVisibilityBatchResult>\n");
+    xml.push_str("  <ResponseMetadata>\n");
+    xml.push_str(&format!("    <RequestId>{}</RequestId>\n", Uuid::new_v4()));
+    xml.push_str("  </ResponseMetadata>\n");
+    xml.push_str("</ChangeMessageVisibilityBatchResponse>");
+
+    xml
+}
+
 /// Build a ReceiveMessage response.
 pub fn build_receive_message_response(messages: &[ReceivedMessageInfo]) -> String {
     let mut xml = String::new();

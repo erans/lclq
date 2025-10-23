@@ -8,9 +8,10 @@ use tracing::{debug, info};
 
 use crate::config::LclqConfig;
 use crate::sqs::{
-    build_create_queue_response, build_delete_message_batch_response,
-    build_delete_message_response, build_error_response, build_get_queue_attributes_response,
-    build_get_queue_url_response, build_list_queues_response, build_receive_message_response,
+    build_change_visibility_batch_response, build_create_queue_response,
+    build_delete_message_batch_response, build_delete_message_response, build_error_response,
+    build_get_queue_attributes_response, build_get_queue_url_response,
+    build_list_queues_response, build_receive_message_response,
     build_send_message_batch_response, build_send_message_response,
     calculate_md5_of_attributes, calculate_md5_of_body, extract_queue_name_from_url,
     BatchErrorEntry, BatchResultEntry, MessageAttributeInfo, ReceivedMessageInfo, SqsAction,
@@ -57,6 +58,7 @@ impl SqsHandler {
             SqsAction::DeleteMessage => self.handle_delete_message(request).await,
             SqsAction::DeleteMessageBatch => self.handle_delete_message_batch(request).await,
             SqsAction::ChangeMessageVisibility => self.handle_change_message_visibility(request).await,
+            SqsAction::ChangeMessageVisibilityBatch => self.handle_change_message_visibility_batch(request).await,
             SqsAction::PurgeQueue => self.handle_purge_queue(request).await,
             SqsAction::GetQueueAttributes => self.handle_get_queue_attributes(request).await,
             SqsAction::SetQueueAttributes => self.handle_set_queue_attributes(request).await,
@@ -670,6 +672,88 @@ impl SqsHandler {
         }
     }
 
+    /// Handle ChangeMessageVisibilityBatch action.
+    async fn handle_change_message_visibility_batch(&self, request: SqsRequest) -> String {
+        let queue_url = match request.get_required_param("QueueUrl") {
+            Ok(url) => url,
+            Err(e) => return build_error_response(SqsErrorCode::MissingParameter, &e),
+        };
+
+        let queue_name = match extract_queue_name_from_url(queue_url) {
+            Some(name) => name,
+            None => {
+                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+            }
+        };
+
+        // Parse batch entries
+        let entries = request.parse_change_visibility_batch_entries();
+
+        if entries.is_empty() {
+            return build_error_response(
+                SqsErrorCode::InvalidParameterValue,
+                "No batch entries provided",
+            );
+        }
+
+        if entries.len() > 10 {
+            return build_error_response(
+                SqsErrorCode::InvalidParameterValue,
+                "Maximum 10 batch entries allowed",
+            );
+        }
+
+        let mut successful_ids = Vec::new();
+        let mut failed_entries = Vec::new();
+
+        // Process each entry
+        for entry in entries {
+            // Validate visibility timeout
+            if entry.visibility_timeout > 43200 {
+                failed_entries.push(BatchErrorEntry {
+                    id: entry.id.clone(),
+                    code: "InvalidParameterValue".to_string(),
+                    message: "VisibilityTimeout must be between 0 and 43200 seconds".to_string(),
+                    sender_fault: true,
+                });
+                continue;
+            }
+
+            match self
+                .backend
+                .change_visibility(&queue_name, &entry.receipt_handle, entry.visibility_timeout)
+                .await
+            {
+                Ok(_) => {
+                    successful_ids.push(entry.id.clone());
+                    debug!(
+                        queue_name = %queue_name,
+                        entry_id = %entry.id,
+                        visibility_timeout = entry.visibility_timeout,
+                        "Batch message visibility changed"
+                    );
+                }
+                Err(e) => {
+                    failed_entries.push(BatchErrorEntry {
+                        id: entry.id.clone(),
+                        code: "ReceiptHandleIsInvalid".to_string(),
+                        message: e.to_string(),
+                        sender_fault: true,
+                    });
+                }
+            }
+        }
+
+        info!(
+            queue_name = %queue_name,
+            successful = successful_ids.len(),
+            failed = failed_entries.len(),
+            "Batch message visibility changes processed"
+        );
+
+        build_change_visibility_batch_response(&successful_ids, &failed_entries)
+    }
+
     /// Handle PurgeQueue action.
     async fn handle_purge_queue(&self, request: SqsRequest) -> String {
         let queue_url = match request.get_required_param("QueueUrl") {
@@ -1154,6 +1238,88 @@ fn xml_to_json_response(xml: &str) -> String {
         }
 
         // Parse failed entries
+        pos = 0;
+        while let Some(entry_start) = xml[pos..].find("<BatchResultErrorEntry>") {
+            let abs_start = pos + entry_start;
+            if let Some(entry_end_rel) = xml[abs_start..].find("</BatchResultErrorEntry>") {
+                let entry_xml = &xml[abs_start..abs_start + entry_end_rel + 24];
+                let mut entry = serde_json::Map::new();
+
+                if let Some(id_start) = entry_xml.find("<Id>") {
+                    if let Some(id_end) = entry_xml.find("</Id>") {
+                        entry.insert("Id".to_string(), json!(&entry_xml[id_start + 4..id_end]));
+                    }
+                }
+
+                if let Some(code_start) = entry_xml.find("<Code>") {
+                    if let Some(code_end) = entry_xml.find("</Code>") {
+                        entry.insert("Code".to_string(), json!(&entry_xml[code_start + 6..code_end]));
+                    }
+                }
+
+                if let Some(msg_start) = entry_xml.find("<Message>") {
+                    if let Some(msg_end) = entry_xml.find("</Message>") {
+                        entry.insert("Message".to_string(), json!(&entry_xml[msg_start + 9..msg_end]));
+                    }
+                }
+
+                if let Some(sf_start) = entry_xml.find("<SenderFault>") {
+                    if let Some(sf_end) = entry_xml.find("</SenderFault>") {
+                        let sf_val = &entry_xml[sf_start + 13..sf_end] == "true";
+                        entry.insert("SenderFault".to_string(), json!(sf_val));
+                    }
+                }
+
+                failed.push(entry);
+                pos = abs_start + entry_end_rel + 24;
+            } else {
+                break;
+            }
+        }
+
+        let mut result = serde_json::Map::new();
+        result.insert("Successful".to_string(), json!(successful));
+        result.insert("Failed".to_string(), json!(failed));
+        return json!(result).to_string();
+    }
+
+    // For DeleteMessageBatch and ChangeMessageVisibilityBatch - collect successful and failed entries
+    if xml.contains("DeleteMessageBatchResponse") || xml.contains("DeleteMessageBatchResult")
+        || xml.contains("ChangeMessageVisibilityBatchResponse") || xml.contains("ChangeMessageVisibilityBatchResult") {
+        let mut successful = Vec::new();
+        let mut failed = Vec::new();
+        let mut pos = 0;
+
+        // Determine the result entry tag name
+        let success_tag = if xml.contains("DeleteMessageBatch") {
+            "DeleteMessageBatchResultEntry"
+        } else {
+            "ChangeMessageVisibilityBatchResultEntry"
+        };
+
+        // Parse successful entries
+        while let Some(entry_start) = xml[pos..].find(&format!("<{}>", success_tag)) {
+            let abs_start = pos + entry_start;
+            let end_tag = format!("</{}>", success_tag);
+            if let Some(entry_end_rel) = xml[abs_start..].find(&end_tag) {
+                let entry_xml = &xml[abs_start..abs_start + entry_end_rel + end_tag.len()];
+                let mut entry = serde_json::Map::new();
+
+                // Extract Id
+                if let Some(id_start) = entry_xml.find("<Id>") {
+                    if let Some(id_end) = entry_xml.find("</Id>") {
+                        entry.insert("Id".to_string(), json!(&entry_xml[id_start + 4..id_end]));
+                    }
+                }
+
+                successful.push(entry);
+                pos = abs_start + entry_end_rel + end_tag.len();
+            } else {
+                break;
+            }
+        }
+
+        // Parse failed entries (shared structure)
         pos = 0;
         while let Some(entry_start) = xml[pos..].find("<BatchResultErrorEntry>") {
             let abs_start = pos + entry_start;
