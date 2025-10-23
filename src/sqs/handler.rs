@@ -10,9 +10,11 @@ use crate::config::LclqConfig;
 use crate::sqs::{
     build_create_queue_response, build_delete_message_response, build_error_response,
     build_get_queue_attributes_response, build_get_queue_url_response,
-    build_list_queues_response, build_receive_message_response, build_send_message_response,
+    build_list_queues_response, build_receive_message_response,
+    build_send_message_batch_response, build_send_message_response,
     calculate_md5_of_attributes, calculate_md5_of_body, extract_queue_name_from_url,
-    MessageAttributeInfo, ReceivedMessageInfo, SqsAction, SqsErrorCode, SqsRequest,
+    BatchErrorEntry, BatchResultEntry, MessageAttributeInfo, ReceivedMessageInfo, SqsAction,
+    SqsErrorCode, SqsRequest,
 };
 use crate::storage::{QueueFilter, StorageBackend};
 use crate::types::validation::{validate_sqs_queue_name, SQS_MAX_MESSAGE_SIZE};
@@ -50,6 +52,7 @@ impl SqsHandler {
             SqsAction::DeleteQueue => self.handle_delete_queue(request).await,
             SqsAction::ListQueues => self.handle_list_queues(request).await,
             SqsAction::SendMessage => self.handle_send_message(request).await,
+            SqsAction::SendMessageBatch => self.handle_send_message_batch(request).await,
             SqsAction::ReceiveMessage => self.handle_receive_message(request).await,
             SqsAction::DeleteMessage => self.handle_delete_message(request).await,
             SqsAction::PurgeQueue => self.handle_purge_queue(request).await,
@@ -311,6 +314,111 @@ impl SqsHandler {
             }
             Err(e) => build_error_response(SqsErrorCode::InternalError, &e.to_string()),
         }
+    }
+
+    /// Handle SendMessageBatch action.
+    async fn handle_send_message_batch(&self, request: SqsRequest) -> String {
+        let queue_url = match request.get_required_param("QueueUrl") {
+            Ok(url) => url,
+            Err(e) => return build_error_response(SqsErrorCode::MissingParameter, &e),
+        };
+
+        let queue_name = match extract_queue_name_from_url(queue_url) {
+            Some(name) => name,
+            None => {
+                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+            }
+        };
+
+        // Parse batch entries
+        let entries = request.parse_send_message_batch_entries();
+
+        if entries.is_empty() {
+            return build_error_response(
+                SqsErrorCode::InvalidParameterValue,
+                "No batch entries provided",
+            );
+        }
+
+        if entries.len() > 10 {
+            return build_error_response(
+                SqsErrorCode::InvalidParameterValue,
+                "Maximum 10 batch entries allowed",
+            );
+        }
+
+        let mut successful_entries = Vec::new();
+        let mut failed_entries = Vec::new();
+
+        // Process each entry
+        for entry in entries {
+            // Validate message body size
+            if entry.message_body.len() > SQS_MAX_MESSAGE_SIZE {
+                failed_entries.push(BatchErrorEntry {
+                    id: entry.id.clone(),
+                    code: "MessageTooLong".to_string(),
+                    message: format!(
+                        "Message body size {} exceeds maximum {}",
+                        entry.message_body.len(),
+                        SQS_MAX_MESSAGE_SIZE
+                    ),
+                    sender_fault: true,
+                });
+                continue;
+            }
+
+            // Create message
+            let message = Message {
+                id: MessageId::new(),
+                body: entry.message_body.clone(),
+                attributes: MessageAttributes::new(), // TODO: Support batch message attributes
+                queue_id: queue_name.clone(),
+                sent_timestamp: Utc::now(),
+                receive_count: 0,
+                message_group_id: entry.message_group_id.clone(),
+                deduplication_id: entry.message_deduplication_id.clone(),
+                sequence_number: None,
+                delay_seconds: entry.delay_seconds,
+            };
+
+            // Send message
+            match self.backend.send_message(&queue_name, message.clone()).await {
+                Ok(sent_message) => {
+                    let md5_of_body = calculate_md5_of_body(&sent_message.body);
+
+                    successful_entries.push(BatchResultEntry {
+                        id: entry.id.clone(),
+                        message_id: sent_message.id.0.clone(),
+                        md5_of_body,
+                        md5_of_attrs: None, // TODO: Support batch message attributes
+                    });
+
+                    debug!(
+                        queue_name = %queue_name,
+                        entry_id = %entry.id,
+                        message_id = %sent_message.id,
+                        "Batch message sent"
+                    );
+                }
+                Err(e) => {
+                    failed_entries.push(BatchErrorEntry {
+                        id: entry.id.clone(),
+                        code: "InternalError".to_string(),
+                        message: e.to_string(),
+                        sender_fault: false,
+                    });
+                }
+            }
+        }
+
+        info!(
+            queue_name = %queue_name,
+            successful = successful_entries.len(),
+            failed = failed_entries.len(),
+            "Batch messages processed"
+        );
+
+        build_send_message_batch_response(&successful_entries, &failed_entries)
     }
 
     /// Handle ReceiveMessage action.
@@ -885,6 +993,90 @@ fn xml_to_json_response(xml: &str) -> String {
         }
 
         return json!({"Attributes": attributes}).to_string();
+    }
+
+    // For SendMessageBatch - collect successful and failed entries
+    if xml.contains("SendMessageBatchResponse") || xml.contains("SendMessageBatchResult") {
+        let mut successful = Vec::new();
+        let mut failed = Vec::new();
+        let mut pos = 0;
+
+        // Parse successful entries
+        while let Some(entry_start) = xml[pos..].find("<SendMessageBatchResultEntry>") {
+            let abs_start = pos + entry_start;
+            if let Some(entry_end_rel) = xml[abs_start..].find("</SendMessageBatchResultEntry>") {
+                let entry_xml = &xml[abs_start..abs_start + entry_end_rel + 30];
+                let mut entry = serde_json::Map::new();
+
+                if let Some(id_start) = entry_xml.find("<Id>") {
+                    if let Some(id_end) = entry_xml.find("</Id>") {
+                        entry.insert("Id".to_string(), json!(&entry_xml[id_start + 4..id_end]));
+                    }
+                }
+
+                if let Some(mid_start) = entry_xml.find("<MessageId>") {
+                    if let Some(mid_end) = entry_xml.find("</MessageId>") {
+                        entry.insert("MessageId".to_string(), json!(&entry_xml[mid_start + 11..mid_end]));
+                    }
+                }
+
+                if let Some(md5_start) = entry_xml.find("<MD5OfMessageBody>") {
+                    if let Some(md5_end) = entry_xml.find("</MD5OfMessageBody>") {
+                        entry.insert("MD5OfMessageBody".to_string(), json!(&entry_xml[md5_start + 18..md5_end]));
+                    }
+                }
+
+                successful.push(entry);
+                pos = abs_start + entry_end_rel + 30;
+            } else {
+                break;
+            }
+        }
+
+        // Parse failed entries
+        pos = 0;
+        while let Some(entry_start) = xml[pos..].find("<BatchResultErrorEntry>") {
+            let abs_start = pos + entry_start;
+            if let Some(entry_end_rel) = xml[abs_start..].find("</BatchResultErrorEntry>") {
+                let entry_xml = &xml[abs_start..abs_start + entry_end_rel + 24];
+                let mut entry = serde_json::Map::new();
+
+                if let Some(id_start) = entry_xml.find("<Id>") {
+                    if let Some(id_end) = entry_xml.find("</Id>") {
+                        entry.insert("Id".to_string(), json!(&entry_xml[id_start + 4..id_end]));
+                    }
+                }
+
+                if let Some(code_start) = entry_xml.find("<Code>") {
+                    if let Some(code_end) = entry_xml.find("</Code>") {
+                        entry.insert("Code".to_string(), json!(&entry_xml[code_start + 6..code_end]));
+                    }
+                }
+
+                if let Some(msg_start) = entry_xml.find("<Message>") {
+                    if let Some(msg_end) = entry_xml.find("</Message>") {
+                        entry.insert("Message".to_string(), json!(&entry_xml[msg_start + 9..msg_end]));
+                    }
+                }
+
+                if let Some(sf_start) = entry_xml.find("<SenderFault>") {
+                    if let Some(sf_end) = entry_xml.find("</SenderFault>") {
+                        let sf_val = &entry_xml[sf_start + 13..sf_end] == "true";
+                        entry.insert("SenderFault".to_string(), json!(sf_val));
+                    }
+                }
+
+                failed.push(entry);
+                pos = abs_start + entry_end_rel + 24;
+            } else {
+                break;
+            }
+        }
+
+        let mut result = serde_json::Map::new();
+        result.insert("Successful".to_string(), json!(successful));
+        result.insert("Failed".to_string(), json!(failed));
+        return json!(result).to_string();
     }
 
     // Simple parsing - extract QueueUrl if present (for CreateQueue, GetQueueUrl)

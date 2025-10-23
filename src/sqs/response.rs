@@ -84,6 +84,73 @@ pub fn build_send_message_response(message_id: &str, md5_of_body: &str, md5_of_a
     }
 }
 
+/// Batch result entry for SendMessageBatch.
+pub struct BatchResultEntry {
+    /// Entry ID.
+    pub id: String,
+    /// Message ID.
+    pub message_id: String,
+    /// MD5 of message body.
+    pub md5_of_body: String,
+    /// MD5 of message attributes (optional).
+    pub md5_of_attrs: Option<String>,
+}
+
+/// Batch error entry for SendMessageBatch.
+pub struct BatchErrorEntry {
+    /// Entry ID.
+    pub id: String,
+    /// Error code.
+    pub code: String,
+    /// Error message.
+    pub message: String,
+    /// Sender fault flag.
+    pub sender_fault: bool,
+}
+
+/// Build a SendMessageBatch response.
+pub fn build_send_message_batch_response(
+    successful: &[BatchResultEntry],
+    failed: &[BatchErrorEntry],
+) -> String {
+    let mut xml = String::new();
+    xml.push_str(r#"<?xml version="1.0"?>"#);
+    xml.push('\n');
+    xml.push_str(r#"<SendMessageBatchResponse xmlns="http://queue.amazonaws.com/doc/2012-11-05/">"#);
+    xml.push('\n');
+    xml.push_str("  <SendMessageBatchResult>\n");
+
+    // Add successful entries
+    for entry in successful {
+        xml.push_str("    <SendMessageBatchResultEntry>\n");
+        xml.push_str(&format!("      <Id>{}</Id>\n", escape_xml(&entry.id)));
+        xml.push_str(&format!("      <MessageId>{}</MessageId>\n", escape_xml(&entry.message_id)));
+        xml.push_str(&format!("      <MD5OfMessageBody>{}</MD5OfMessageBody>\n", escape_xml(&entry.md5_of_body)));
+        if let Some(md5_attrs) = &entry.md5_of_attrs {
+            xml.push_str(&format!("      <MD5OfMessageAttributes>{}</MD5OfMessageAttributes>\n", escape_xml(md5_attrs)));
+        }
+        xml.push_str("    </SendMessageBatchResultEntry>\n");
+    }
+
+    // Add failed entries
+    for entry in failed {
+        xml.push_str("    <BatchResultErrorEntry>\n");
+        xml.push_str(&format!("      <Id>{}</Id>\n", escape_xml(&entry.id)));
+        xml.push_str(&format!("      <Code>{}</Code>\n", escape_xml(&entry.code)));
+        xml.push_str(&format!("      <Message>{}</Message>\n", escape_xml(&entry.message)));
+        xml.push_str(&format!("      <SenderFault>{}</SenderFault>\n", entry.sender_fault));
+        xml.push_str("    </BatchResultErrorEntry>\n");
+    }
+
+    xml.push_str("  </SendMessageBatchResult>\n");
+    xml.push_str("  <ResponseMetadata>\n");
+    xml.push_str(&format!("    <RequestId>{}</RequestId>\n", Uuid::new_v4()));
+    xml.push_str("  </ResponseMetadata>\n");
+    xml.push_str("</SendMessageBatchResponse>");
+
+    xml
+}
+
 /// Build a ReceiveMessage response.
 pub fn build_receive_message_response(messages: &[ReceivedMessageInfo]) -> String {
     let mut xml = String::new();

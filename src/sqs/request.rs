@@ -268,7 +268,43 @@ impl SqsRequest {
     pub fn parse_send_message_batch_entries(&self) -> Vec<SendMessageBatchEntry> {
         let mut entries = Vec::new();
 
-        // Batch entries are encoded as:
+        // For JSON requests, Entries is a JSON array string
+        if let Some(entries_json) = self.get_param("Entries") {
+            // Try to parse as JSON array
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(entries_json) {
+                if let Some(arr) = json_value.as_array() {
+                    for entry in arr {
+                        if let (Some(id), Some(body)) = (
+                            entry["Id"].as_str(),
+                            entry["MessageBody"].as_str(),
+                        ) {
+                            let delay_seconds = entry["DelaySeconds"]
+                                .as_u64()
+                                .map(|d| d as u32);
+
+                            let dedup_id = entry["MessageDeduplicationId"]
+                                .as_str()
+                                .map(String::from);
+
+                            let group_id = entry["MessageGroupId"]
+                                .as_str()
+                                .map(String::from);
+
+                            entries.push(SendMessageBatchEntry {
+                                id: id.to_string(),
+                                message_body: body.to_string(),
+                                delay_seconds,
+                                message_deduplication_id: dedup_id,
+                                message_group_id: group_id,
+                            });
+                        }
+                    }
+                    return entries;
+                }
+            }
+        }
+
+        // For form-encoded requests, batch entries are encoded as:
         // SendMessageBatchRequestEntry.1.Id=msg1
         // SendMessageBatchRequestEntry.1.MessageBody=Hello
         // SendMessageBatchRequestEntry.2.Id=msg2
