@@ -193,6 +193,7 @@ impl InMemoryBackend {
     }
 
     /// Clean up expired deduplication cache entries (older than 5 minutes).
+    #[allow(dead_code)]
     async fn cleanup_deduplication_cache(&self, queue_id: &str) -> Result<()> {
         let mut queues = self.inner.queues.write().await;
         let cutoff = Utc::now() - Duration::minutes(5);

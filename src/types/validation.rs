@@ -14,8 +14,7 @@ pub fn validate_sqs_queue_name(name: &str) -> Result<()> {
     }
 
     // FIFO queues must end with .fifo and base name must be ≤75 chars
-    if name.ends_with(".fifo") {
-        let base_name = &name[..name.len() - 5];
+    if let Some(base_name) = name.strip_suffix(".fifo") {
         if base_name.is_empty() || base_name.len() > 75 {
             return Err(ValidationError::InvalidQueueName(format!(
                 "FIFO queue base name must be 1-75 characters, got {}",

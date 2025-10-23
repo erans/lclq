@@ -23,7 +23,7 @@ use crate::types::{
 /// SQS actions handler.
 pub struct SqsHandler {
     backend: Arc<dyn StorageBackend>,
-    config: LclqConfig,
+    _config: LclqConfig,
     base_url: String,
 }
 
@@ -34,16 +34,17 @@ impl SqsHandler {
         info!(base_url = %base_url, "SQS handler initialized");
         Self {
             backend,
-            config,
+            _config: config,
             base_url,
         }
     }
 
-    /// Handle an SQS request and return XML response.
-    pub async fn handle_request(&self, request: SqsRequest) -> String {
+    /// Handle an SQS request and return response body and content type.
+    pub async fn handle_request(&self, request: SqsRequest) -> (String, String) {
         debug!(action = ?request.action, "Handling SQS request");
 
-        match request.action {
+        let is_json = request.is_json;
+        let response_xml = match request.action {
             SqsAction::CreateQueue => self.handle_create_queue(request).await,
             SqsAction::GetQueueUrl => self.handle_get_queue_url(request).await,
             SqsAction::DeleteQueue => self.handle_delete_queue(request).await,
@@ -56,6 +57,16 @@ impl SqsHandler {
                 SqsErrorCode::InvalidParameterValue,
                 "Action not yet implemented",
             ),
+        };
+
+        // Convert to JSON if request was JSON
+        if is_json {
+            tracing::info!("Converting XML to JSON. XML: {}", response_xml);
+            let json_response = xml_to_json_response(&response_xml);
+            tracing::info!("JSON response: {}", json_response);
+            (json_response, "application/x-amz-json-1.0".to_string())
+        } else {
+            (response_xml, "application/xml".to_string())
         }
     }
 
@@ -115,7 +126,7 @@ impl SqsHandler {
                     .unwrap_or(5);
 
                 let target_arn = policy["deadLetterTargetArn"].as_str().unwrap_or("");
-                let target_queue_id = target_arn.split(':').last().unwrap_or(target_arn);
+                let target_queue_id = target_arn.split(':').next_back().unwrap_or(target_arn);
 
                 Some(DlqConfig {
                     target_queue_id: target_queue_id.to_string(),
@@ -345,23 +356,24 @@ impl SqsHandler {
                     let md5_of_body = calculate_md5_of_body(&received.message.body);
 
                     // Convert attributes
-                    let mut attributes = Vec::new();
-                    attributes.push((
-                        "SenderId".to_string(),
-                        "AIDAIT2UOQQY3AUEKVGXU".to_string(), // Dummy sender ID
-                    ));
-                    attributes.push((
-                        "SentTimestamp".to_string(),
-                        received.message.sent_timestamp.timestamp_millis().to_string(),
-                    ));
-                    attributes.push((
-                        "ApproximateReceiveCount".to_string(),
-                        received.message.receive_count.to_string(),
-                    ));
-                    attributes.push((
-                        "ApproximateFirstReceiveTimestamp".to_string(),
-                        Utc::now().timestamp_millis().to_string(),
-                    ));
+                    let attributes = vec![
+                        (
+                            "SenderId".to_string(),
+                            "AIDAIT2UOQQY3AUEKVGXU".to_string(), // Dummy sender ID
+                        ),
+                        (
+                            "SentTimestamp".to_string(),
+                            received.message.sent_timestamp.timestamp_millis().to_string(),
+                        ),
+                        (
+                            "ApproximateReceiveCount".to_string(),
+                            received.message.receive_count.to_string(),
+                        ),
+                        (
+                            "ApproximateFirstReceiveTimestamp".to_string(),
+                            Utc::now().timestamp_millis().to_string(),
+                        ),
+                    ];
 
                     // Convert message attributes
                     let mut msg_attributes = Vec::new();
@@ -456,3 +468,117 @@ impl SqsHandler {
         format!("{}/queue/{}", self.base_url, queue_name)
     }
 }
+
+/// Convert XML response to JSON for AWS JSON 1.0 protocol.
+/// This is a simple implementation that extracts common fields.
+fn xml_to_json_response(xml: &str) -> String {
+    use serde_json::json;
+
+    // For empty responses (like DeleteMessage), return empty JSON
+    if xml.contains("DeleteMessageResponse") || xml.contains("PurgeQueueResponse") {
+        return json!({}).to_string();
+    }
+
+    // For Messages in ReceiveMessage - must check BEFORE MessageId
+    if xml.contains("<Message>") && xml.contains("ReceiveMessageResponse") {
+        let mut messages = Vec::new();
+        let mut pos = 0;
+
+        while let Some(msg_start) = xml[pos..].find("<Message>") {
+            let abs_start = pos + msg_start;
+            if let Some(msg_end_rel) = xml[abs_start..].find("</Message>") {
+                let msg_xml = &xml[abs_start..abs_start + msg_end_rel + 10];
+
+                let mut message = serde_json::Map::new();
+
+                // Extract MessageId
+                if let Some(id_start) = msg_xml.find("<MessageId>") {
+                    if let Some(id_end) = msg_xml.find("</MessageId>") {
+                        let id = &msg_xml[id_start + 11..id_end];
+                        message.insert("MessageId".to_string(), json!(id));
+                    }
+                }
+
+                // Extract ReceiptHandle
+                if let Some(rh_start) = msg_xml.find("<ReceiptHandle>") {
+                    if let Some(rh_end) = msg_xml.find("</ReceiptHandle>") {
+                        let rh = &msg_xml[rh_start + 15..rh_end];
+                        message.insert("ReceiptHandle".to_string(), json!(rh));
+                    }
+                }
+
+                // Extract Body
+                if let Some(body_start) = msg_xml.find("<Body>") {
+                    if let Some(body_end) = msg_xml.find("</Body>") {
+                        let body = &msg_xml[body_start + 6..body_end];
+                        message.insert("Body".to_string(), json!(body));
+                    }
+                }
+
+                // Extract MD5
+                if let Some(md5_start) = msg_xml.find("<MD5OfBody>") {
+                    if let Some(md5_end) = msg_xml.find("</MD5OfBody>") {
+                        let md5 = &msg_xml[md5_start + 11..md5_end];
+                        message.insert("MD5OfBody".to_string(), json!(md5));
+                    }
+                }
+
+                messages.push(message);
+                pos = abs_start + msg_end_rel + 10;
+            } else {
+                break;
+            }
+        }
+
+        return json!({"Messages": messages}).to_string();
+    }
+
+    // For ListQueues - collect all QueueUrl elements into an array
+    if xml.contains("ListQueuesResponse") || xml.contains("ListQueuesResult") {
+        let mut queue_urls = Vec::new();
+        let mut pos = 0;
+
+        while let Some(url_start) = xml[pos..].find("<QueueUrl>") {
+            let abs_start = pos + url_start;
+            if let Some(url_end_rel) = xml[abs_start..].find("</QueueUrl>") {
+                let url = &xml[abs_start + 10..abs_start + url_end_rel];
+                queue_urls.push(url);
+                pos = abs_start + url_end_rel + 11;
+            } else {
+                break;
+            }
+        }
+
+        return json!({"QueueUrls": queue_urls}).to_string();
+    }
+
+    // Simple parsing - extract QueueUrl if present (for CreateQueue, GetQueueUrl)
+    if let Some(start) = xml.find("<QueueUrl>") {
+        if let Some(end) = xml.find("</QueueUrl>") {
+            let queue_url = &xml[start + 10..end];
+            return json!({"QueueUrl": queue_url}).to_string();
+        }
+    }
+
+    // Extract MessageId if present (SendMessage response)
+    if let Some(start) = xml.find("<MessageId>") {
+        if let Some(end) = xml.find("</MessageId>") {
+            let message_id = &xml[start + 11..end];
+            let mut response = json!({"MessageId": message_id});
+
+            // Also extract MD5 if present
+            if let Some(md5_start) = xml.find("<MD5OfMessageBody>") {
+                if let Some(md5_end) = xml.find("</MD5OfMessageBody>") {
+                    let md5 = &xml[md5_start + 18..md5_end];
+                    response["MD5OfMessageBody"] = json!(md5);
+                }
+            }
+
+            return response.to_string();
+        }
+    }
+
+    // Default: return empty JSON
+    json!({}).to_string()
+}
+

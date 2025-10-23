@@ -1,5 +1,7 @@
 //! AWS SQS-specific data types.
 
+use std::str::FromStr;
+
 use base64::Engine;
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
@@ -44,31 +46,34 @@ pub enum SqsAction {
     ChangeMessageVisibilityBatch,
 }
 
-impl SqsAction {
-    /// Parse action from string.
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for SqsAction {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "CreateQueue" => Some(Self::CreateQueue),
-            "DeleteQueue" => Some(Self::DeleteQueue),
-            "GetQueueUrl" => Some(Self::GetQueueUrl),
-            "GetQueueAttributes" => Some(Self::GetQueueAttributes),
-            "SetQueueAttributes" => Some(Self::SetQueueAttributes),
-            "ListQueues" => Some(Self::ListQueues),
-            "PurgeQueue" => Some(Self::PurgeQueue),
-            "TagQueue" => Some(Self::TagQueue),
-            "UntagQueue" => Some(Self::UntagQueue),
-            "ListQueueTags" => Some(Self::ListQueueTags),
-            "SendMessage" => Some(Self::SendMessage),
-            "SendMessageBatch" => Some(Self::SendMessageBatch),
-            "ReceiveMessage" => Some(Self::ReceiveMessage),
-            "DeleteMessage" => Some(Self::DeleteMessage),
-            "DeleteMessageBatch" => Some(Self::DeleteMessageBatch),
-            "ChangeMessageVisibility" => Some(Self::ChangeMessageVisibility),
-            "ChangeMessageVisibilityBatch" => Some(Self::ChangeMessageVisibilityBatch),
-            _ => None,
+            "CreateQueue" => Ok(Self::CreateQueue),
+            "DeleteQueue" => Ok(Self::DeleteQueue),
+            "GetQueueUrl" => Ok(Self::GetQueueUrl),
+            "GetQueueAttributes" => Ok(Self::GetQueueAttributes),
+            "SetQueueAttributes" => Ok(Self::SetQueueAttributes),
+            "ListQueues" => Ok(Self::ListQueues),
+            "PurgeQueue" => Ok(Self::PurgeQueue),
+            "TagQueue" => Ok(Self::TagQueue),
+            "UntagQueue" => Ok(Self::UntagQueue),
+            "ListQueueTags" => Ok(Self::ListQueueTags),
+            "SendMessage" => Ok(Self::SendMessage),
+            "SendMessageBatch" => Ok(Self::SendMessageBatch),
+            "ReceiveMessage" => Ok(Self::ReceiveMessage),
+            "DeleteMessage" => Ok(Self::DeleteMessage),
+            "DeleteMessageBatch" => Ok(Self::DeleteMessageBatch),
+            "ChangeMessageVisibility" => Ok(Self::ChangeMessageVisibility),
+            "ChangeMessageVisibilityBatch" => Ok(Self::ChangeMessageVisibilityBatch),
+            _ => Err(format!("Unknown SQS action: {}", s)),
         }
     }
+}
 
+impl SqsAction {
     /// Convert action to string.
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -143,32 +148,35 @@ pub enum QueueAttribute {
     QueueArn,
 }
 
-impl QueueAttribute {
-    /// Parse attribute from string.
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for QueueAttribute {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "All" => Some(Self::All),
-            "ApproximateNumberOfMessages" => Some(Self::ApproximateNumberOfMessages),
+            "All" => Ok(Self::All),
+            "ApproximateNumberOfMessages" => Ok(Self::ApproximateNumberOfMessages),
             "ApproximateNumberOfMessagesNotVisible" => {
-                Some(Self::ApproximateNumberOfMessagesNotVisible)
+                Ok(Self::ApproximateNumberOfMessagesNotVisible)
             }
             "ApproximateNumberOfMessagesDelayed" => {
-                Some(Self::ApproximateNumberOfMessagesDelayed)
+                Ok(Self::ApproximateNumberOfMessagesDelayed)
             }
-            "CreatedTimestamp" => Some(Self::CreatedTimestamp),
-            "LastModifiedTimestamp" => Some(Self::LastModifiedTimestamp),
-            "VisibilityTimeout" => Some(Self::VisibilityTimeout),
-            "MaximumMessageSize" => Some(Self::MaximumMessageSize),
-            "MessageRetentionPeriod" => Some(Self::MessageRetentionPeriod),
-            "DelaySeconds" => Some(Self::DelaySeconds),
-            "RedrivePolicy" => Some(Self::RedrivePolicy),
-            "FifoQueue" => Some(Self::FifoQueue),
-            "ContentBasedDeduplication" => Some(Self::ContentBasedDeduplication),
-            "QueueArn" => Some(Self::QueueArn),
-            _ => None,
+            "CreatedTimestamp" => Ok(Self::CreatedTimestamp),
+            "LastModifiedTimestamp" => Ok(Self::LastModifiedTimestamp),
+            "VisibilityTimeout" => Ok(Self::VisibilityTimeout),
+            "MaximumMessageSize" => Ok(Self::MaximumMessageSize),
+            "MessageRetentionPeriod" => Ok(Self::MessageRetentionPeriod),
+            "DelaySeconds" => Ok(Self::DelaySeconds),
+            "RedrivePolicy" => Ok(Self::RedrivePolicy),
+            "FifoQueue" => Ok(Self::FifoQueue),
+            "ContentBasedDeduplication" => Ok(Self::ContentBasedDeduplication),
+            "QueueArn" => Ok(Self::QueueArn),
+            _ => Err(format!("Unknown queue attribute: {}", s)),
         }
     }
+}
 
+impl QueueAttribute {
     /// Convert attribute to string.
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -285,24 +293,24 @@ mod tests {
     #[test]
     fn test_sqs_action_parsing() {
         assert_eq!(
-            SqsAction::from_str("CreateQueue"),
-            Some(SqsAction::CreateQueue)
+            "CreateQueue".parse::<SqsAction>(),
+            Ok(SqsAction::CreateQueue)
         );
         assert_eq!(
-            SqsAction::from_str("SendMessage"),
-            Some(SqsAction::SendMessage)
+            "SendMessage".parse::<SqsAction>(),
+            Ok(SqsAction::SendMessage)
         );
-        assert_eq!(SqsAction::from_str("InvalidAction"), None);
+        assert!("InvalidAction".parse::<SqsAction>().is_err());
     }
 
     #[test]
     fn test_queue_attribute_parsing() {
         assert_eq!(
-            QueueAttribute::from_str("VisibilityTimeout"),
-            Some(QueueAttribute::VisibilityTimeout)
+            "VisibilityTimeout".parse::<QueueAttribute>(),
+            Ok(QueueAttribute::VisibilityTimeout)
         );
-        assert_eq!(QueueAttribute::from_str("All"), Some(QueueAttribute::All));
-        assert_eq!(QueueAttribute::from_str("InvalidAttr"), None);
+        assert_eq!("All".parse::<QueueAttribute>(), Ok(QueueAttribute::All));
+        assert!("InvalidAttr".parse::<QueueAttribute>().is_err());
     }
 
     #[test]

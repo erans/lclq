@@ -206,14 +206,16 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 
 ### 2.2 SQS Request/Response Handling
 - [x] Implement request parsing in `src/sqs/request.rs`
-  - [x] Parse form-encoded POST bodies
-  - [x] Extract Action parameter
+  - [x] Parse form-encoded POST bodies (query protocol)
+  - [x] Parse JSON POST bodies (AWS JSON 1.0 protocol)
+  - [x] Extract Action parameter from body or X-Amz-Target header
   - [x] Parse queue URLs
-  - [x] Parse message attributes
-  - [x] Parse queue attributes
+  - [x] Parse message attributes (both protocols)
+  - [x] Parse queue attributes (both protocols)
   - [x] Handle batch operations
 - [x] Implement response generation in `src/sqs/response.rs`
   - [x] XML response builder
+  - [x] JSON response conversion (for AWS JSON 1.0 protocol)
   - [x] Error response formatting
   - [x] Success response formatting
   - [x] Batch response formatting
@@ -282,20 +284,23 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 - [ ] Add compression support (gzip)
 
 ### 2.6 SQS Integration Tests
-- [ ] Create integration test suite in `tests/sqs_integration.rs`
-  - [ ] Test with boto3 (Python SDK)
+- [x] Create integration test suite in `tests/integration/python/`
+  - [x] Test with boto3 (Python SDK)
+  - [x] Poetry-based project setup
+  - [x] 10 comprehensive test functions
   - [ ] Test with AWS SDK for JavaScript v3
   - [ ] Test with AWS SDK for Go v2
   - [ ] Test with AWS SDK for Rust
-- [ ] Test scenarios
-  - [ ] Create queue and send/receive messages
-  - [ ] FIFO queue ordering
-  - [ ] Deduplication
+- [x] Test scenarios (boto3)
+  - [x] Create queue and send/receive messages
+  - [x] FIFO queue ordering
+  - [x] Content-based deduplication
+  - [x] Message attributes
+  - [x] Batch send/receive operations
+  - [x] DeleteMessage and DeleteQueue
   - [ ] Dead letter queue functionality
   - [ ] Long polling
-  - [ ] Batch operations
-  - [ ] Message attributes
-  - [ ] Visibility timeout
+  - [ ] Visibility timeout changes
 
 ---
 

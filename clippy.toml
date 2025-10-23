@@ -7,7 +7,7 @@ msrv = "1.82"
 cognitive-complexity-threshold = 30
 
 # Documentation
-missing-docs-in-private-items = false
+missing-docs-in-crate-items = false
 
 # Performance
 too-many-lines-threshold = 300

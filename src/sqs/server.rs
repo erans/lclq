@@ -5,7 +5,7 @@ use std::sync::Arc;
 use axum::{
     body::Bytes,
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::post,
     Router,
@@ -51,9 +51,13 @@ pub async fn start_sqs_server(
 /// Handle SQS POST request.
 async fn handle_sqs_request(
     State(state): State<SqsServerState>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    // Parse form-encoded body
+    // Log headers for debugging
+    info!("Request headers: {:?}", headers);
+
+    // Parse body as UTF-8
     let body_str = match std::str::from_utf8(&body) {
         Ok(s) => s,
         Err(e) => {
@@ -66,8 +70,8 @@ async fn handle_sqs_request(
         }
     };
 
-    // Parse SQS request
-    let request = match SqsRequest::parse(body_str) {
+    // Parse SQS request (handles both JSON and form-encoded)
+    let request = match SqsRequest::parse_with_headers(body_str, &headers) {
         Ok(req) => req,
         Err(e) => {
             error!(error = %e, "Failed to parse SQS request");
@@ -77,13 +81,13 @@ async fn handle_sqs_request(
     };
 
     // Handle the request
-    let response_xml = state.handler.handle_request(request).await;
+    let (response_body, content_type) = state.handler.handle_request(request).await;
 
-    // Return XML response
+    // Return response with appropriate content type
     (
         StatusCode::OK,
-        [("Content-Type", "application/xml")],
-        response_xml,
+        [("Content-Type", content_type.as_str())],
+        response_body,
     )
         .into_response()
 }

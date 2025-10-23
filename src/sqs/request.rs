@@ -1,6 +1,8 @@
 //! SQS request parsing from form-encoded POST bodies.
 
 use crate::sqs::types::{SqsAction, SqsMessageAttributeValue, SqsMessageAttributes};
+use axum::http::HeaderMap;
+use serde_json::Value;
 use std::collections::HashMap;
 
 /// Parsed SQS request.
@@ -10,19 +12,117 @@ pub struct SqsRequest {
     pub action: SqsAction,
     /// Request parameters.
     pub params: HashMap<String, String>,
+    /// Whether this is a JSON request (AWS JSON 1.0 protocol).
+    pub is_json: bool,
 }
 
 impl SqsRequest {
+    /// Parse a request with headers (supports both JSON and form-encoded).
+    pub fn parse_with_headers(body: &str, headers: &HeaderMap) -> Result<Self, String> {
+        tracing::info!("Parsing request body: {}", body);
+
+        // Check if this is a JSON request (AWS JSON 1.0 protocol)
+        if body.trim().starts_with('{') {
+            return Self::parse_json(body, headers);
+        }
+
+        // Otherwise, parse as form-encoded
+        Self::parse(body)
+    }
+
+    /// Parse a JSON request (AWS JSON 1.0 protocol).
+    fn parse_json(body: &str, headers: &HeaderMap) -> Result<Self, String> {
+        // Extract action from X-Amz-Target header
+        // Format: "AmazonSQS.CreateQueue"
+        let target = headers
+            .get("x-amz-target")
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| "Missing X-Amz-Target header for JSON request".to_string())?;
+
+        let action_str = target
+            .strip_prefix("AmazonSQS.")
+            .ok_or_else(|| format!("Invalid X-Amz-Target format: {}", target))?;
+
+        let action = action_str.parse::<SqsAction>()
+            .map_err(|e| format!("Unknown action: {}", e))?;
+
+        // Parse JSON body
+        let json: Value = serde_json::from_str(body)
+            .map_err(|e| format!("Failed to parse JSON body: {}", e))?;
+
+        // Convert JSON to HashMap<String, String>
+        let mut params = HashMap::new();
+        if let Some(obj) = json.as_object() {
+            for (key, value) in obj {
+                // Handle Attributes as a nested object or JSON string
+                if key == "Attributes" {
+                    match value {
+                        Value::Object(attrs) => {
+                            // Nested object - flatten it
+                            for (attr_key, attr_val) in attrs {
+                                let attr_str = match attr_val {
+                                    Value::String(s) => s.clone(),
+                                    _ => attr_val.to_string(),
+                                };
+                                params.insert(attr_key.clone(), attr_str);
+                            }
+                            continue; // Don't add Attributes itself
+                        }
+                        Value::String(s) if s.trim().starts_with('{') => {
+                            // JSON string - parse and flatten
+                            if let Ok(attrs) = serde_json::from_str::<serde_json::Map<String, Value>>(s) {
+                                for (attr_key, attr_val) in attrs {
+                                    let attr_str = match attr_val {
+                                        Value::String(s) => s,
+                                        _ => attr_val.to_string(),
+                                    };
+                                    params.insert(attr_key, attr_str);
+                                }
+                            }
+                            continue; // Don't add Attributes itself
+                        }
+                        _ => {} // Fall through to normal handling
+                    }
+                }
+
+                // Convert JSON value to string
+                let value_str = match value {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    Value::Object(_) => serde_json::to_string(value)
+                        .map_err(|e| format!("Failed to serialize object: {}", e))?,
+                    _ => value.to_string(),
+                };
+                params.insert(key.clone(), value_str);
+            }
+        }
+
+        tracing::info!("Parsed JSON parameters: {:?}", params);
+
+        Ok(Self {
+            action,
+            params,
+            is_json: true,
+        })
+    }
+
     /// Parse a form-encoded request body.
     pub fn parse(body: &str) -> Result<Self, String> {
+        tracing::info!("Parsing request body: {}", body);
         let params = parse_form_data(body);
+        tracing::info!("Parsed parameters: {:?}", params);
 
         let action = params
             .get("Action")
-            .and_then(|a| SqsAction::from_str(a))
+            .and_then(|a| a.parse::<SqsAction>().ok())
             .ok_or_else(|| "Missing or invalid Action parameter".to_string())?;
 
-        Ok(Self { action, params })
+        Ok(Self {
+            action,
+            params,
+            is_json: false,
+        })
     }
 
     /// Get a parameter value.
@@ -83,7 +183,26 @@ impl SqsRequest {
     pub fn parse_queue_attributes(&self) -> HashMap<String, String> {
         let mut attributes = HashMap::new();
 
-        // Queue attributes are encoded as:
+        // For JSON protocol, attributes are flattened directly into params
+        // Check common attribute names first
+        let known_attributes = [
+            "FifoQueue",
+            "ContentBasedDeduplication",
+            "VisibilityTimeout",
+            "MessageRetentionPeriod",
+            "DelaySeconds",
+            "MaximumMessageSize",
+            "ReceiveMessageWaitTimeSeconds",
+            "RedrivePolicy",
+        ];
+
+        for attr_name in &known_attributes {
+            if let Some(value) = self.get_param(attr_name) {
+                attributes.insert(attr_name.to_string(), value.to_string());
+            }
+        }
+
+        // Also parse query protocol format:
         // Attribute.1.Name=VisibilityTimeout
         // Attribute.1.Value=30
         // Attribute.2.Name=MessageRetentionPeriod
@@ -214,7 +333,7 @@ pub fn extract_queue_name_from_url(queue_url: &str) -> Option<String> {
     // Queue URL format: http://localhost:9324/queue/my-queue
     queue_url
         .split('/')
-        .last()
+        .next_back()
         .filter(|s| !s.is_empty())
         .map(String::from)
 }

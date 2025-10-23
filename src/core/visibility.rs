@@ -83,7 +83,7 @@ impl VisibilityManager {
 /// This function is called periodically to move messages with expired
 /// visibility timeouts back to the available queue.
 pub async fn process_expired_messages_in_memory(
-    backend: Arc<dyn StorageBackend>,
+    _backend: Arc<dyn StorageBackend>,
 ) -> crate::Result<()> {
     // Implementation would access the backend's internal state
     // For now, this is a placeholder showing the design
