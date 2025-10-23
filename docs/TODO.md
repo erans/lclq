@@ -595,27 +595,29 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [ ] Optional authentication
   - [x] CORS support
 
-### 6.3 Metrics and Monitoring
-- [ ] Implement Prometheus metrics in `src/metrics/`
-  - [ ] `Metrics` struct with all metrics
-  - [ ] Counter metrics
-    - [ ] `lclq_messages_sent_total` by queue_id and dialect
-    - [ ] `lclq_messages_received_total` by queue_id and dialect
-    - [ ] `lclq_messages_deleted_total` by queue_id and dialect
-    - [ ] `lclq_messages_to_dlq_total` by queue_id
-    - [ ] `lclq_backend_errors_total` by backend and operation
-  - [ ] Histogram metrics
-    - [ ] `lclq_send_latency_seconds` by backend
-    - [ ] `lclq_receive_latency_seconds` by backend
-  - [ ] Gauge metrics
-    - [ ] `lclq_queue_depth` by queue_id
-    - [ ] `lclq_in_flight_messages` by queue_id
-    - [ ] `lclq_queue_count` by backend
-    - [ ] `lclq_active_connections` by dialect
-- [ ] Metrics HTTP server
-  - [ ] `GET /metrics` endpoint (port 9090)
-  - [ ] Prometheus exposition format
-- [ ] Add metric recording throughout codebase
+### 6.3 Metrics and Monitoring ✅ COMPLETE (Infrastructure)
+- [x] Implement Prometheus metrics in `src/metrics/`
+  - [x] `Metrics` struct with all metrics
+  - [x] Counter metrics
+    - [x] `lclq_messages_sent_total` by queue_id, queue_name, and dialect
+    - [x] `lclq_messages_received_total` by queue_id, queue_name, and dialect
+    - [x] `lclq_messages_deleted_total` by queue_id, queue_name, and dialect
+    - [x] `lclq_messages_to_dlq_total` by queue_id and queue_name
+    - [x] `lclq_backend_errors_total` by backend and operation
+    - [x] `lclq_api_requests_total` by api, method, endpoint, and status
+  - [x] Histogram metrics
+    - [x] `lclq_send_latency_seconds` by backend
+    - [x] `lclq_receive_latency_seconds` by backend
+    - [x] `lclq_api_latency_seconds` by api and endpoint
+  - [x] Gauge metrics
+    - [x] `lclq_queue_depth` by queue_id and queue_name
+    - [x] `lclq_in_flight_messages` by queue_id and queue_name
+    - [x] `lclq_queue_count` total
+    - [x] `lclq_active_connections` by dialect
+- [x] Metrics HTTP server
+  - [x] `GET /metrics` endpoint (port 9090)
+  - [x] Prometheus exposition format
+- [ ] Add metric recording throughout codebase (future enhancement)
 
 ### 6.4 Graceful Shutdown
 - [ ] Implement shutdown handling in `src/server/shutdown.rs`

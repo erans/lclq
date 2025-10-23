@@ -2,3 +2,6 @@
 
 /// Admin HTTP API server
 pub mod admin;
+
+/// Metrics HTTP server
+pub mod metrics;
