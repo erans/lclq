@@ -56,6 +56,7 @@ impl SqsHandler {
             SqsAction::ReceiveMessage => self.handle_receive_message(request).await,
             SqsAction::DeleteMessage => self.handle_delete_message(request).await,
             SqsAction::DeleteMessageBatch => self.handle_delete_message_batch(request).await,
+            SqsAction::ChangeMessageVisibility => self.handle_change_message_visibility(request).await,
             SqsAction::PurgeQueue => self.handle_purge_queue(request).await,
             SqsAction::GetQueueAttributes => self.handle_get_queue_attributes(request).await,
             SqsAction::SetQueueAttributes => self.handle_set_queue_attributes(request).await,
@@ -615,6 +616,58 @@ impl SqsHandler {
         );
 
         build_delete_message_batch_response(&successful_ids, &failed_entries)
+    }
+
+    /// Handle ChangeMessageVisibility action.
+    async fn handle_change_message_visibility(&self, request: SqsRequest) -> String {
+        let queue_url = match request.get_required_param("QueueUrl") {
+            Ok(url) => url,
+            Err(e) => return build_error_response(SqsErrorCode::MissingParameter, &e),
+        };
+
+        let receipt_handle = match request.get_required_param("ReceiptHandle") {
+            Ok(handle) => handle,
+            Err(e) => return build_error_response(SqsErrorCode::MissingParameter, &e),
+        };
+
+        let visibility_timeout = match request.get_required_param("VisibilityTimeout") {
+            Ok(timeout_str) => match timeout_str.parse::<u32>() {
+                Ok(timeout) if timeout <= 43200 => timeout,
+                _ => {
+                    return build_error_response(
+                        SqsErrorCode::InvalidParameterValue,
+                        "VisibilityTimeout must be between 0 and 43200 seconds",
+                    )
+                }
+            },
+            Err(e) => return build_error_response(SqsErrorCode::MissingParameter, &e),
+        };
+
+        let queue_name = match extract_queue_name_from_url(queue_url) {
+            Some(name) => name,
+            None => {
+                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+            }
+        };
+
+        match self
+            .backend
+            .change_visibility(&queue_name, receipt_handle, visibility_timeout)
+            .await
+        {
+            Ok(_) => {
+                debug!(
+                    queue_name = %queue_name,
+                    visibility_timeout = visibility_timeout,
+                    "Message visibility changed"
+                );
+                build_delete_message_response() // Empty response
+            }
+            Err(_) => build_error_response(
+                SqsErrorCode::ReceiptHandleIsInvalid,
+                "Receipt handle is invalid",
+            ),
+        }
     }
 
     /// Handle PurgeQueue action.

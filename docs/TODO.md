@@ -239,7 +239,7 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] `ReceiveMessage` - receive messages with long polling
   - [x] `DeleteMessage` - delete single message
   - [x] `DeleteMessageBatch` - delete up to 10 messages
-  - [ ] `ChangeMessageVisibility` - update visibility timeout
+  - [x] `ChangeMessageVisibility` - update visibility timeout
   - [ ] `ChangeMessageVisibilityBatch` - batch visibility update
 
 ### 2.4 SQS-Specific Features
