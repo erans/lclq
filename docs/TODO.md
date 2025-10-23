@@ -1,7 +1,7 @@
 # lclq Implementation TODO
 
 **Status:** Ready for Implementation
-**Last Updated:** October 2025 (Documentation Phase - COMPLETE ✅)
+**Last Updated:** October 2025 (Phase 5: REST API Infrastructure - COMPLETE ✅)
 
 This document tracks all implementation tasks for lclq based on the PRD and Technical PRD.
 
@@ -527,17 +527,21 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 
 ---
 
-## Phase 5: GCP Pub/Sub HTTP/REST (Week 8)
+## Phase 5: GCP Pub/Sub HTTP/REST (Week 8) 🚧 IN PROGRESS
 
-### 5.1 REST API Implementation
-- [ ] Implement REST handlers in `src/pubsub/rest.rs`
-  - [ ] Route configuration with Axum
-  - [ ] JSON request/response handling
-  - [ ] Resource name parsing from URL paths
-  - [ ] Error formatting (Google Cloud error format)
+### 5.1 REST API Implementation ✅ INFRASTRUCTURE COMPLETE
+- [x] **Create REST API infrastructure in `src/pubsub/rest.rs`** (560 lines)
+  - [x] Route configuration with Axum (all 11 endpoints)
+  - [x] JSON request/response handling with serde
+  - [x] Complete type definitions (Topic, Subscription, Message, etc.)
+  - [x] Error formatting (Google Cloud error format)
+  - [x] Base64 encoding/decoding for message data
+  - [x] Graceful shutdown support
+  - [x] Placeholder handlers (return NOT_IMPLEMENTED)
+  - [ ] Implement actual handler logic (pending)
 
 ### 5.2 REST Endpoints - Topics
-- [ ] Implement topic endpoints
+- [ ] Implement topic endpoint handlers
   - [ ] `PUT /v1/projects/{project}/topics/{topic}` - create topic
   - [ ] `GET /v1/projects/{project}/topics/{topic}` - get topic
   - [ ] `DELETE /v1/projects/{project}/topics/{topic}` - delete topic
@@ -545,7 +549,7 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [ ] `POST /v1/projects/{project}/topics/{topic}:publish` - publish messages
 
 ### 5.3 REST Endpoints - Subscriptions
-- [ ] Implement subscription endpoints
+- [ ] Implement subscription endpoint handlers
   - [ ] `PUT /v1/projects/{project}/subscriptions/{subscription}` - create subscription
   - [ ] `GET /v1/projects/{project}/subscriptions/{subscription}` - get subscription
   - [ ] `DELETE /v1/projects/{project}/subscriptions/{subscription}` - delete subscription
@@ -553,8 +557,8 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:pull` - pull messages
   - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:acknowledge` - ack messages
   - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:modifyAckDeadline` - modify deadline
-  - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:modifyPushConfig` - modify push config
-  - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:seek` - seek subscription
+  - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:modifyPushConfig` - modify push config (stub)
+  - [ ] `POST /v1/projects/{project}/subscriptions/{subscription}:seek` - seek subscription (stub)
 
 ### 5.4 Push Subscription Support
 - [ ] Implement push delivery in `src/pubsub/push.rs`

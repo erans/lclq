@@ -23,6 +23,7 @@ pub mod types;
 pub mod publisher;
 pub mod subscriber;
 pub mod grpc_server;
+pub mod rest;
 
 pub use types::*;
 
