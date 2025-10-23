@@ -1,0 +1,14 @@
+# Default code owners for everything
+* @eran
+
+# CI/CD workflows
+/.github/ @eran
+
+# Docker configuration
+/Dockerfile @eran
+/docker-compose.yml @eran
+/.dockerignore @eran
+
+# Documentation
+/docs/ @eran
+/README.md @eran

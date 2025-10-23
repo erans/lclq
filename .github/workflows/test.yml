@@ -1,0 +1,216 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Check formatting
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  # Run clippy lints
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  # Build and test on multiple platforms
+  test:
+    name: Test - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --verbose
+
+      - name: Run tests
+        run: cargo test --verbose
+
+      - name: Run SQLite backend tests
+        run: cargo test --test sqlite_backend_test --verbose
+
+  # Build Docker image
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: lclq:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker image
+        run: |
+          docker run -d --name lclq-test -p 9324:9324 -p 9000:9000 \
+            -e LCLQ_BIND_ADDRESS=0.0.0.0 lclq:ci
+          sleep 5
+          curl -f http://localhost:9000/health || exit 1
+          curl -f http://localhost:9090/metrics || exit 1
+          docker stop lclq-test
+          docker rm lclq-test
+
+  # Run benchmarks (don't fail on performance regression, just measure)
+  bench:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run benchmarks
+        run: cargo bench --no-fail-fast -- --output-format bencher | tee benchmark-results.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results.txt
+
+  # Integration tests with Python SDK
+  integration-python:
+    name: Integration - Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Build lclq
+        run: cargo build --release
+
+      - name: Start lclq server
+        run: |
+          ./target/release/lclq start &
+          sleep 3
+        env:
+          RUST_LOG: info
+
+      - name: Install Python dependencies
+        working-directory: tests/integration/python
+        run: poetry install
+
+      - name: Run Python integration tests
+        working-directory: tests/integration/python
+        run: poetry run pytest test_sqs_advanced.py -v
+
+  # Integration tests with JavaScript SDK
+  integration-javascript:
+    name: Integration - JavaScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build lclq
+        run: cargo build --release
+
+      - name: Start lclq server
+        run: |
+          ./target/release/lclq start &
+          sleep 3
+        env:
+          RUST_LOG: info
+
+      - name: Install Node dependencies
+        working-directory: tests/integration/javascript
+        run: npm install
+
+      - name: Run JavaScript integration tests
+        working-directory: tests/integration/javascript
+        run: npm test
+
+  # Integration tests with Go SDK
+  integration-go:
+    name: Integration - Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build lclq
+        run: cargo build --release
+
+      - name: Start lclq server
+        run: |
+          ./target/release/lclq start &
+          sleep 3
+        env:
+          RUST_LOG: info
+
+      - name: Install Go dependencies
+        working-directory: tests/integration/go
+        run: go mod download
+
+      - name: Run Go integration tests
+        working-directory: tests/integration/go
+        run: go test -v ./...
+
+  # All required checks passed
+  ci-success:
+    name: CI Success
+    needs: [fmt, clippy, test, docker, integration-python, integration-javascript, integration-go]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark CI as successful
+        run: echo "All CI checks passed!"
