@@ -142,7 +142,8 @@ pub fn validate_topic_id(topic_id: &str) -> Result<()> {
         )));
     }
 
-    let first_char = topic_id.chars().next().unwrap();
+    let first_char = topic_id.chars().next()
+        .expect("topic_id is guaranteed to be non-empty by length check above");
     if !first_char.is_ascii_alphabetic() {
         return Err(Error::Validation(ValidationError::InvalidTopicId(
             "Topic ID must start with a letter".to_string(),
@@ -176,7 +177,8 @@ pub fn validate_subscription_id(subscription_id: &str) -> Result<()> {
         ));
     }
 
-    let first_char = subscription_id.chars().next().unwrap();
+    let first_char = subscription_id.chars().next()
+        .expect("subscription_id is guaranteed to be non-empty by length check above");
     if !first_char.is_ascii_alphabetic() {
         return Err(Error::Validation(
             ValidationError::InvalidSubscriptionId(
@@ -213,7 +215,8 @@ pub fn validate_project_id(project_id: &str) -> Result<()> {
         }));
     }
 
-    let first_char = project_id.chars().next().unwrap();
+    let first_char = project_id.chars().next()
+        .expect("project_id is guaranteed to be non-empty by length check above");
     if !first_char.is_ascii_lowercase() {
         return Err(Error::Validation(ValidationError::InvalidParameter {
             name: "project_id".to_string(),

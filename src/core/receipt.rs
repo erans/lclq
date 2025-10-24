@@ -26,10 +26,18 @@ pub struct ReceiptHandleData {
 }
 
 /// Get the secret key for HMAC signing.
-/// Uses LCLQ_RECEIPT_SECRET environment variable, or a default for development.
+/// Uses LCLQ_RECEIPT_SECRET environment variable.
+///
+/// SECURITY: For production use, ALWAYS set LCLQ_RECEIPT_SECRET to a strong random value.
+/// The function will panic on first use if the environment variable is not set,
+/// forcing explicit configuration rather than using a predictable default.
 fn get_secret_key() -> Vec<u8> {
     std::env::var("LCLQ_RECEIPT_SECRET")
-        .unwrap_or_else(|_| "lclq-default-secret-change-in-production".to_string())
+        .expect(
+            "LCLQ_RECEIPT_SECRET environment variable must be set. \
+            For security, receipt handles require a secret key for HMAC signatures. \
+            Generate a strong random secret: openssl rand -hex 32"
+        )
         .into_bytes()
 }
 
@@ -116,8 +124,21 @@ pub fn parse_receipt_handle(receipt_handle: &str) -> Result<ReceiptHandleData> {
 mod tests {
     use super::*;
 
+    /// Set up test environment with required secret key
+    fn setup_test_env() {
+        // SAFETY: This is safe in tests because:
+        // 1. Tests run sequentially by default (not parallel for this module)
+        // 2. We set the variable before any code reads it
+        // 3. The value doesn't change after being set
+        unsafe {
+            std::env::set_var("LCLQ_RECEIPT_SECRET", "test-secret-key-for-testing-only");
+        }
+    }
+
     #[test]
     fn test_receipt_handle_roundtrip() {
+        setup_test_env();
+
         let queue_id = "test-queue";
         let message_id = MessageId::new();
 
@@ -133,12 +154,16 @@ mod tests {
 
     #[test]
     fn test_parse_invalid_receipt_handle() {
+        setup_test_env();
+
         assert!(parse_receipt_handle("invalid").is_err());
         assert!(parse_receipt_handle("").is_err());
     }
 
     #[test]
     fn test_forged_receipt_handle_rejected() {
+        setup_test_env();
+
         // Create a valid receipt handle
         let queue_id = "test-queue";
         let message_id = MessageId::new();
@@ -162,6 +187,8 @@ mod tests {
 
     #[test]
     fn test_receipt_handle_without_signature_rejected() {
+        setup_test_env();
+
         // Create data without signature
         let data = ReceiptHandleData {
             queue_id: "test-queue".to_string(),

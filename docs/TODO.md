@@ -130,6 +130,7 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Message group ordering
   - [x] Sequence number assignment
   - [x] Content-based deduplication (SHA-256)
+  - [x] Deduplication cache cleanup (automatic inline cleanup after 1000 entries)
 - [x] Implement maintenance operations
   - [x] `purge_queue` - Remove all messages from queue
   - [x] `get_stats` - Return queue statistics

@@ -598,7 +598,9 @@ async fn handle_topic_action(
                 let publish_req: PublishRequest = serde_json::from_value(payload)
                     .map_err(|e| ErrorResponse::new(StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)))?;
                 let response = publish(Path((project, topic.to_string())), State(state), Json(publish_req)).await?;
-                Ok(Json(serde_json::to_value(response.0).unwrap()))
+                let value = serde_json::to_value(response.0)
+                    .map_err(|e| ErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to serialize response: {}", e)))?;
+                Ok(Json(value))
             }
             _ => Err(ErrorResponse::new(
                 StatusCode::NOT_FOUND,

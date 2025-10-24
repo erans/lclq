@@ -193,18 +193,30 @@ impl InMemoryBackend {
     }
 
     /// Clean up expired deduplication cache entries (older than 5 minutes).
-    #[allow(dead_code)]
-    async fn cleanup_deduplication_cache(&self, queue_id: &str) -> Result<()> {
-        let mut queues = self.inner.queues.write().await;
-        let cutoff = Utc::now() - Duration::minutes(5);
+    /// This is called inline during message operations to prevent unbounded cache growth.
+    fn cleanup_deduplication_cache_inline(queue: &mut QueueData) {
+        const DEDUP_WINDOW: i64 = 5; // 5 minutes per SQS spec
+        const CLEANUP_THRESHOLD: usize = 1000; // Clean up after 1000 entries
 
-        if let Some(queue) = queues.get_mut(queue_id) {
+        // Only clean up if cache is getting large
+        if queue.deduplication_cache.len() > CLEANUP_THRESHOLD {
+            let cutoff = Utc::now() - Duration::minutes(DEDUP_WINDOW);
+            let before = queue.deduplication_cache.len();
+
             queue
                 .deduplication_cache
                 .retain(|_, timestamp| *timestamp > cutoff);
-        }
 
-        Ok(())
+            let after = queue.deduplication_cache.len();
+            if before > after {
+                debug!(
+                    queue_id = %queue.config.id,
+                    removed = before - after,
+                    remaining = after,
+                    "Cleaned up expired deduplication cache entries"
+                );
+            }
+        }
     }
 
     /// Generate content-based deduplication ID.
@@ -257,6 +269,9 @@ impl InMemoryBackend {
 
             // Add to deduplication cache
             queue.deduplication_cache.insert(dedup_id, Utc::now());
+
+            // Clean up expired entries if cache is getting large
+            Self::cleanup_deduplication_cache_inline(queue);
 
             // Assign sequence number
             message.sequence_number = Some(queue.next_sequence_number);
@@ -426,6 +441,9 @@ impl StorageBackend for InMemoryBackend {
             // Add to deduplication cache
             queue.deduplication_cache.insert(dedup_id, Utc::now());
 
+            // Clean up expired entries if cache is getting large
+            Self::cleanup_deduplication_cache_inline(queue);
+
             // Assign sequence number
             message.sequence_number = Some(queue.next_sequence_number);
             queue.next_sequence_number += 1;
@@ -562,7 +580,6 @@ impl StorageBackend for InMemoryBackend {
                     }
                 }
 
-                // Remove from available messages
                 let stored = queue.available_messages.remove(i).unwrap();
                 let mut message = stored.message;
                 message.receive_count += 1;
