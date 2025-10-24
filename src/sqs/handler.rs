@@ -8,14 +8,14 @@ use tracing::{debug, info};
 
 use crate::config::LclqConfig;
 use crate::sqs::{
-    build_change_visibility_batch_response, build_create_queue_response,
-    build_delete_message_batch_response, build_delete_message_response, build_error_response,
-    build_get_queue_attributes_response, build_get_queue_url_response,
-    build_list_queues_response, build_receive_message_response,
-    build_send_message_batch_response, build_send_message_response,
-    calculate_md5_of_attributes, calculate_md5_of_body, escape_xml, extract_queue_name_from_url,
-    BatchErrorEntry, BatchResultEntry, MessageAttributeInfo, ReceivedMessageInfo, SqsAction,
-    SqsErrorCode, SqsRequest,
+    build_change_message_visibility_response, build_change_visibility_batch_response,
+    build_create_queue_response, build_delete_message_batch_response,
+    build_delete_message_response, build_error_response, build_get_queue_attributes_response,
+    build_get_queue_url_response, build_list_queues_response, build_receive_message_response,
+    build_send_message_batch_response, build_send_message_response, build_tag_queue_response,
+    build_untag_queue_response, calculate_md5_of_attributes, calculate_md5_of_body, escape_xml,
+    extract_queue_name_from_url, BatchErrorEntry, BatchResultEntry, MessageAttributeInfo,
+    ReceivedMessageInfo, SqsAction, SqsErrorCode, SqsRequest,
 };
 use crate::storage::{QueueFilter, StorageBackend};
 use crate::types::validation::{validate_sqs_queue_name, SQS_MAX_MESSAGE_SIZE};
@@ -699,7 +699,7 @@ impl SqsHandler {
                     visibility_timeout = visibility_timeout,
                     "Message visibility changed"
                 );
-                build_delete_message_response() // Empty response
+                build_change_message_visibility_response()
             }
             Err(_) => build_error_response(
                 SqsErrorCode::ReceiptHandleIsInvalid,
@@ -1123,7 +1123,7 @@ impl SqsHandler {
         match self.backend.update_queue(queue_config).await {
             Ok(_) => {
                 info!(queue_name = %queue_name, "Queue tags added");
-                build_delete_message_response() // TagQueue has empty response
+                build_tag_queue_response()
             }
             Err(e) => build_error_response(SqsErrorCode::InternalError, &e.to_string()),
         }
@@ -1171,7 +1171,7 @@ impl SqsHandler {
         match self.backend.update_queue(queue_config).await {
             Ok(_) => {
                 info!(queue_name = %queue_name, "Queue tags removed");
-                build_delete_message_response() // UntagQueue has empty response
+                build_untag_queue_response()
             }
             Err(e) => build_error_response(SqsErrorCode::InternalError, &e.to_string()),
         }
@@ -1848,5 +1848,438 @@ fn xml_to_json_response(xml: &str) -> String {
 
     // Default: return empty JSON
     json!({}).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::LclqConfig;
+    use crate::sqs::SqsRequest;
+    use crate::storage::memory::InMemoryBackend;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    /// Create a test SQS handler with in-memory backend.
+    fn create_test_handler() -> SqsHandler {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let config = LclqConfig::default();
+        SqsHandler::new(backend, config)
+    }
+
+    /// Helper to create a queue for testing.
+    async fn create_test_queue(handler: &SqsHandler, queue_name: &str) {
+        let mut params = HashMap::new();
+        params.insert("QueueName".to_string(), queue_name.to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::CreateQueue,
+            params,
+            is_json: false,
+        };
+
+        handler.handle_request(request).await;
+    }
+
+    // ========================================================================
+    // TagQueue Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_tag_queue_success() {
+        let handler = create_test_handler();
+
+        // Create a queue first
+        create_test_queue(&handler, "test-queue").await;
+
+        // Tag the queue
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue".to_string());
+        params.insert("Tag.1.Key".to_string(), "Environment".to_string());
+        params.insert("Tag.1.Value".to_string(), "Test".to_string());
+        params.insert("Tag.2.Key".to_string(), "Owner".to_string());
+        params.insert("Tag.2.Value".to_string(), "Alice".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::TagQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        assert!(response.contains("TagQueueResponse"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_tag_queue_missing_queue_url() {
+        let handler = create_test_handler();
+
+        let mut params = HashMap::new();
+        params.insert("Tag.1.Key".to_string(), "Environment".to_string());
+        params.insert("Tag.1.Value".to_string(), "Test".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::TagQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("MissingParameter"));
+    }
+
+    #[tokio::test]
+    async fn test_tag_queue_nonexistent_queue() {
+        let handler = create_test_handler();
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/nonexistent".to_string());
+        params.insert("Tag.1.Key".to_string(), "Environment".to_string());
+        params.insert("Tag.1.Value".to_string(), "Test".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::TagQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+
+        assert!(response.contains("<Error>"));
+    }
+
+    // ========================================================================
+    // UntagQueue Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_untag_queue_success() {
+        let handler = create_test_handler();
+
+        // Create and tag a queue
+        create_test_queue(&handler, "test-queue-untag").await;
+
+        let mut tag_params = HashMap::new();
+        tag_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-untag".to_string());
+        tag_params.insert("Tag.1.Key".to_string(), "Environment".to_string());
+        tag_params.insert("Tag.1.Value".to_string(), "Test".to_string());
+
+        let tag_request = SqsRequest {
+            action: SqsAction::TagQueue,
+            params: tag_params,
+            is_json: false,
+        };
+
+        handler.handle_request(tag_request).await;
+
+        // Now untag
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-untag".to_string());
+        params.insert("TagKey.1".to_string(), "Environment".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::UntagQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        assert!(response.contains("UntagQueueResponse"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_untag_queue_missing_queue_url() {
+        let handler = create_test_handler();
+
+        let mut params = HashMap::new();
+        params.insert("TagKey.1".to_string(), "Environment".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::UntagQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("MissingParameter"));
+    }
+
+    // ========================================================================
+    // ListQueueTags Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_list_queue_tags_success() {
+        let handler = create_test_handler();
+
+        // Create and tag a queue
+        create_test_queue(&handler, "test-queue-list-tags").await;
+
+        let mut tag_params = HashMap::new();
+        tag_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-list-tags".to_string());
+        tag_params.insert("Tag.1.Key".to_string(), "Environment".to_string());
+        tag_params.insert("Tag.1.Value".to_string(), "Production".to_string());
+        tag_params.insert("Tag.2.Key".to_string(), "Team".to_string());
+        tag_params.insert("Tag.2.Value".to_string(), "Backend".to_string());
+
+        let tag_request = SqsRequest {
+            action: SqsAction::TagQueue,
+            params: tag_params,
+            is_json: false,
+        };
+
+        handler.handle_request(tag_request).await;
+
+        // List tags
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-list-tags".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::ListQueueTags,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        assert!(response.contains("ListQueueTagsResponse"));
+        assert!(response.contains("Environment"));
+        assert!(response.contains("Production"));
+        assert!(response.contains("Team"));
+        assert!(response.contains("Backend"));
+    }
+
+    #[tokio::test]
+    async fn test_list_queue_tags_empty() {
+        let handler = create_test_handler();
+
+        // Create a queue without tags
+        create_test_queue(&handler, "test-queue-no-tags").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-no-tags".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::ListQueueTags,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+
+        assert!(response.contains("ListQueueTagsResponse"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_list_queue_tags_missing_queue_url() {
+        let handler = create_test_handler();
+
+        let params = HashMap::new();
+
+        let request = SqsRequest {
+            action: SqsAction::ListQueueTags,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("MissingParameter"));
+    }
+
+    // ========================================================================
+    // ChangeMessageVisibility Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_change_message_visibility_success() {
+        let handler = create_test_handler();
+
+        // Create queue and send a message
+        create_test_queue(&handler, "test-queue-visibility").await;
+
+        let mut send_params = HashMap::new();
+        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-visibility".to_string());
+        send_params.insert("MessageBody".to_string(), "Test message".to_string());
+
+        let send_request = SqsRequest {
+            action: SqsAction::SendMessage,
+            params: send_params,
+            is_json: false,
+        };
+
+        handler.handle_request(send_request).await;
+
+        // Receive the message to get a receipt handle
+        let mut receive_params = HashMap::new();
+        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-visibility".to_string());
+        receive_params.insert("MaxNumberOfMessages".to_string(), "1".to_string());
+
+        let receive_request = SqsRequest {
+            action: SqsAction::ReceiveMessage,
+            params: receive_params,
+            is_json: false,
+        };
+
+        let (receive_response, _) = handler.handle_request(receive_request).await;
+
+        // Extract receipt handle from response
+        if let Some(start) = receive_response.find("<ReceiptHandle>") {
+            if let Some(end) = receive_response.find("</ReceiptHandle>") {
+                let receipt_handle = &receive_response[start + 15..end];
+
+                // Change visibility timeout
+                let mut params = HashMap::new();
+                params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-visibility".to_string());
+                params.insert("ReceiptHandle".to_string(), receipt_handle.to_string());
+                params.insert("VisibilityTimeout".to_string(), "60".to_string());
+
+                let request = SqsRequest {
+                    action: SqsAction::ChangeMessageVisibility,
+                    params,
+                    is_json: false,
+                };
+
+                let (response, content_type) = handler.handle_request(request).await;
+
+                assert_eq!(content_type, "application/xml");
+                assert!(response.contains("ChangeMessageVisibilityResponse"));
+                assert!(!response.contains("<Error>"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_change_message_visibility_missing_receipt_handle() {
+        let handler = create_test_handler();
+
+        create_test_queue(&handler, "test-queue-vis-error").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-vis-error".to_string());
+        params.insert("VisibilityTimeout".to_string(), "60".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::ChangeMessageVisibility,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("MissingParameter"));
+    }
+
+    // ========================================================================
+    // ChangeMessageVisibilityBatch Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_change_message_visibility_batch_success() {
+        let handler = create_test_handler();
+
+        // Create queue and send messages
+        create_test_queue(&handler, "test-queue-batch-vis").await;
+
+        let mut send_params = HashMap::new();
+        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-batch-vis".to_string());
+        send_params.insert("SendMessageBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
+        send_params.insert("SendMessageBatchRequestEntry.1.MessageBody".to_string(), "Message 1".to_string());
+        send_params.insert("SendMessageBatchRequestEntry.2.Id".to_string(), "msg2".to_string());
+        send_params.insert("SendMessageBatchRequestEntry.2.MessageBody".to_string(), "Message 2".to_string());
+
+        let send_request = SqsRequest {
+            action: SqsAction::SendMessageBatch,
+            params: send_params,
+            is_json: false,
+        };
+
+        handler.handle_request(send_request).await;
+
+        // Receive messages
+        let mut receive_params = HashMap::new();
+        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-batch-vis".to_string());
+        receive_params.insert("MaxNumberOfMessages".to_string(), "10".to_string());
+
+        let receive_request = SqsRequest {
+            action: SqsAction::ReceiveMessage,
+            params: receive_params,
+            is_json: false,
+        };
+
+        let (receive_response, _) = handler.handle_request(receive_request).await;
+
+        // Extract receipt handles
+        let mut receipt_handles = Vec::new();
+        let mut pos = 0;
+        while let Some(start) = receive_response[pos..].find("<ReceiptHandle>") {
+            let abs_start = pos + start;
+            if let Some(end_rel) = receive_response[abs_start..].find("</ReceiptHandle>") {
+                let receipt_handle = &receive_response[abs_start + 15..abs_start + end_rel];
+                receipt_handles.push(receipt_handle.to_string());
+                pos = abs_start + end_rel + 16;
+            } else {
+                break;
+            }
+        }
+
+        if receipt_handles.len() >= 2 {
+            // Change visibility batch
+            let mut params = HashMap::new();
+            params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-batch-vis".to_string());
+            params.insert("ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(), "entry1".to_string());
+            params.insert("ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(), receipt_handles[0].clone());
+            params.insert("ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(), "30".to_string());
+            params.insert("ChangeMessageVisibilityBatchRequestEntry.2.Id".to_string(), "entry2".to_string());
+            params.insert("ChangeMessageVisibilityBatchRequestEntry.2.ReceiptHandle".to_string(), receipt_handles[1].clone());
+            params.insert("ChangeMessageVisibilityBatchRequestEntry.2.VisibilityTimeout".to_string(), "60".to_string());
+
+            let request = SqsRequest {
+                action: SqsAction::ChangeMessageVisibilityBatch,
+                params,
+                is_json: false,
+            };
+
+            let (response, content_type) = handler.handle_request(request).await;
+
+            assert_eq!(content_type, "application/xml");
+            assert!(response.contains("ChangeMessageVisibilityBatchResponse"));
+            assert!(!response.contains("<Error>"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_change_message_visibility_batch_missing_queue_url() {
+        let handler = create_test_handler();
+
+        let mut params = HashMap::new();
+        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(), "entry1".to_string());
+        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(), "dummy-handle".to_string());
+        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(), "30".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::ChangeMessageVisibilityBatch,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("MissingParameter"));
+    }
 }
 

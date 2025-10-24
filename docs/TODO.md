@@ -948,9 +948,9 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 ## Testing
 
 ### Unit Tests
-- [x] Test coverage for all modules ✅ IN PROGRESS (28.27% → target 90%)
+- [x] Test coverage for all modules ✅ IN PROGRESS (39.76% → target 90%)
   - [x] Use cargo-tarpaulin to measure
-  - [ ] Target >90% coverage (current: 28.27%)
+  - [ ] Target >90% coverage (current: 39.76%, 1772/4457 lines)
 - [x] Core module tests ✅ PARTIAL
   - [ ] Message router tests
   - [x] Visibility manager tests (3/21 lines)
@@ -973,7 +973,7 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Config methods tests (2 tests)
   - [x] Custom configuration tests (6 tests)
   - [ ] TOML parsing tests (deferred - from_file is stub)
-- [x] SQS handler tests ✅ COMPLETE (16 tests, 250/810 lines - 31%)
+- [x] SQS handler tests ✅ COMPLETE (28 tests, 195 total unit tests passing)
   - [x] CreateQueue (standard & FIFO)
   - [x] GetQueueUrl
   - [x] DeleteQueue
@@ -985,6 +985,12 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] PurgeQueue
   - [x] GetQueueAttributes
   - [x] SetQueueAttributes
+  - [x] TagQueue (3 tests: success, missing_queue_url, nonexistent_queue)
+  - [x] UntagQueue (2 tests: success, missing_queue_url)
+  - [x] ListQueueTags (3 tests: success, empty, missing_queue_url)
+  - [x] ChangeMessageVisibility (2 tests: success, missing_receipt_handle)
+  - [x] ChangeMessageVisibilityBatch (2 tests: success, missing_queue_url)
+  - [x] Fixed 3 implementation bugs (created proper response builders)
 
 ### Integration Tests
 - [ ] SQS integration tests

@@ -295,6 +295,21 @@ pub fn build_delete_message_response() -> String {
     XmlResponseBuilder::new("DeleteMessage").build()
 }
 
+/// Build a TagQueue response (empty result).
+pub fn build_tag_queue_response() -> String {
+    XmlResponseBuilder::new("TagQueue").build()
+}
+
+/// Build an UntagQueue response (empty result).
+pub fn build_untag_queue_response() -> String {
+    XmlResponseBuilder::new("UntagQueue").build()
+}
+
+/// Build a ChangeMessageVisibility response (empty result).
+pub fn build_change_message_visibility_response() -> String {
+    XmlResponseBuilder::new("ChangeMessageVisibility").build()
+}
+
 /// Build a ListQueues response.
 pub fn build_list_queues_response(queue_urls: &[String]) -> String {
     let mut xml = String::new();

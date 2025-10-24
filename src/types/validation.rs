@@ -166,4 +166,188 @@ mod tests {
         assert!(validate_message_size(SQS_MAX_MESSAGE_SIZE, SQS_MAX_MESSAGE_SIZE).is_ok());
         assert!(validate_message_size(SQS_MAX_MESSAGE_SIZE + 1, SQS_MAX_MESSAGE_SIZE).is_err());
     }
+
+    // ========================================================================
+    // Additional SQS Queue Name Tests
+    // ========================================================================
+
+    #[test]
+    fn test_sqs_queue_name_edge_cases() {
+        // Exactly 80 characters (valid)
+        assert!(validate_sqs_queue_name(&"a".repeat(80)).is_ok());
+
+        // FIFO queue with exactly 75 character base name
+        assert!(validate_sqs_queue_name(&format!("{}.fifo", "a".repeat(75))).is_ok());
+
+        // FIFO queue with empty base name
+        assert!(validate_sqs_queue_name(".fifo").is_err());
+
+        // Valid characters (alphanumeric, hyphen, underscore)
+        assert!(validate_sqs_queue_name("Queue-Name_123").is_ok());
+
+        // Invalid special characters
+        assert!(validate_sqs_queue_name("queue.name").is_err());
+        assert!(validate_sqs_queue_name("queue#name").is_err());
+        assert!(validate_sqs_queue_name("queue!name").is_err());
+    }
+
+    #[test]
+    fn test_sqs_fifo_queue_validation() {
+        // Valid FIFO queues
+        assert!(validate_sqs_queue_name("my-queue.fifo").is_ok());
+        assert!(validate_sqs_queue_name("a.fifo").is_ok());
+
+        // FIFO base name too long (76 chars + .fifo = 81 total)
+        assert!(validate_sqs_queue_name(&format!("{}.fifo", "a".repeat(76))).is_err());
+
+        // FIFO base name exactly at limit (75 chars)
+        assert!(validate_sqs_queue_name(&format!("{}.fifo", "a".repeat(75))).is_ok());
+    }
+
+    // ========================================================================
+    // Pub/Sub Topic ID Additional Tests
+    // ========================================================================
+
+    #[test]
+    fn test_pubsub_topic_id_special_characters() {
+        // Valid special characters (-, _, ., ~, +, %)
+        assert!(validate_pubsub_topic_id("topic-name").is_ok());
+        assert!(validate_pubsub_topic_id("topic_name").is_ok());
+        assert!(validate_pubsub_topic_id("topic.name").is_ok());
+        assert!(validate_pubsub_topic_id("topic~name").is_ok());
+        assert!(validate_pubsub_topic_id("topic+name").is_ok());
+        assert!(validate_pubsub_topic_id("topic%name").is_ok());
+
+        // Invalid special characters
+        assert!(validate_pubsub_topic_id("topic@name").is_err());
+        assert!(validate_pubsub_topic_id("topic#name").is_err());
+        assert!(validate_pubsub_topic_id("topic$name").is_err());
+        assert!(validate_pubsub_topic_id("topic name").is_err());
+    }
+
+    #[test]
+    fn test_pubsub_topic_id_length_boundaries() {
+        // Exactly 3 characters (minimum valid)
+        assert!(validate_pubsub_topic_id("abc").is_ok());
+
+        // Exactly 255 characters (maximum valid)
+        let max_valid = format!("a{}", "b".repeat(254));
+        assert!(validate_pubsub_topic_id(&max_valid).is_ok());
+
+        // 2 characters (too short)
+        assert!(validate_pubsub_topic_id("ab").is_err());
+
+        // 256 characters (too long)
+        let too_long = format!("a{}", "b".repeat(255));
+        assert!(validate_pubsub_topic_id(&too_long).is_err());
+    }
+
+    // ========================================================================
+    // Pub/Sub Subscription ID Tests (previously untested!)
+    // ========================================================================
+
+    #[test]
+    fn test_pubsub_subscription_id_validation() {
+        // Valid subscription IDs
+        assert!(validate_pubsub_subscription_id("abc").is_ok());
+        assert!(validate_pubsub_subscription_id("my-subscription").is_ok());
+        assert!(validate_pubsub_subscription_id("my_subscription_123").is_ok());
+        assert!(validate_pubsub_subscription_id("subscription-name").is_ok());
+
+        // Invalid subscription IDs - too short
+        assert!(validate_pubsub_subscription_id("").is_err());
+        assert!(validate_pubsub_subscription_id("a").is_err());
+        assert!(validate_pubsub_subscription_id("ab").is_err());
+
+        // Invalid subscription IDs - too long (256+ characters)
+        assert!(validate_pubsub_subscription_id(&"a".repeat(256)).is_err());
+        assert!(validate_pubsub_subscription_id(&"a".repeat(300)).is_err());
+
+        // Invalid subscription IDs - must start with letter
+        assert!(validate_pubsub_subscription_id("123sub").is_err());
+        assert!(validate_pubsub_subscription_id("_subscription").is_err());
+        assert!(validate_pubsub_subscription_id("-subscription").is_err());
+        assert!(validate_pubsub_subscription_id("9sub").is_err());
+    }
+
+    #[test]
+    fn test_pubsub_subscription_id_special_characters() {
+        // Valid special characters (-, _, ., ~, +, %)
+        assert!(validate_pubsub_subscription_id("sub-name").is_ok());
+        assert!(validate_pubsub_subscription_id("sub_name").is_ok());
+        assert!(validate_pubsub_subscription_id("sub.name").is_ok());
+        assert!(validate_pubsub_subscription_id("sub~name").is_ok());
+        assert!(validate_pubsub_subscription_id("sub+name").is_ok());
+        assert!(validate_pubsub_subscription_id("sub%name").is_ok());
+
+        // Combined special characters
+        assert!(validate_pubsub_subscription_id("my-sub_123.test~v1+beta%20").is_ok());
+
+        // Invalid special characters
+        assert!(validate_pubsub_subscription_id("sub@name").is_err());
+        assert!(validate_pubsub_subscription_id("sub#name").is_err());
+        assert!(validate_pubsub_subscription_id("sub$name").is_err());
+        assert!(validate_pubsub_subscription_id("sub name").is_err());
+        assert!(validate_pubsub_subscription_id("sub!name").is_err());
+        assert!(validate_pubsub_subscription_id("sub&name").is_err());
+    }
+
+    #[test]
+    fn test_pubsub_subscription_id_length_boundaries() {
+        // Exactly 3 characters (minimum valid)
+        assert!(validate_pubsub_subscription_id("abc").is_ok());
+        assert!(validate_pubsub_subscription_id("xyz").is_ok());
+
+        // Exactly 255 characters (maximum valid)
+        let max_valid = format!("s{}", "u".repeat(254));
+        assert!(validate_pubsub_subscription_id(&max_valid).is_ok());
+
+        // 256 characters (too long)
+        let too_long = format!("s{}", "u".repeat(255));
+        assert!(validate_pubsub_subscription_id(&too_long).is_err());
+    }
+
+    #[test]
+    fn test_pubsub_subscription_id_alphanumeric() {
+        // Valid alphanumeric combinations
+        assert!(validate_pubsub_subscription_id("sub123").is_ok());
+        assert!(validate_pubsub_subscription_id("subscription456").is_ok());
+        assert!(validate_pubsub_subscription_id("mySubscription789").is_ok());
+
+        // Must start with letter (not number)
+        assert!(validate_pubsub_subscription_id("1subscription").is_err());
+        assert!(validate_pubsub_subscription_id("0sub").is_err());
+    }
+
+    // ========================================================================
+    // Message Size Additional Tests
+    // ========================================================================
+
+    #[test]
+    fn test_message_size_edge_cases() {
+        // Zero size (valid)
+        assert!(validate_message_size(0, SQS_MAX_MESSAGE_SIZE).is_ok());
+
+        // Exactly at SQS limit
+        assert!(validate_message_size(SQS_MAX_MESSAGE_SIZE, SQS_MAX_MESSAGE_SIZE).is_ok());
+
+        // One byte over SQS limit
+        assert!(validate_message_size(SQS_MAX_MESSAGE_SIZE + 1, SQS_MAX_MESSAGE_SIZE).is_err());
+
+        // Exactly at Pub/Sub limit
+        assert!(validate_message_size(PUBSUB_MAX_MESSAGE_SIZE, PUBSUB_MAX_MESSAGE_SIZE).is_ok());
+
+        // One byte over Pub/Sub limit
+        assert!(validate_message_size(PUBSUB_MAX_MESSAGE_SIZE + 1, PUBSUB_MAX_MESSAGE_SIZE).is_err());
+
+        // Very large message
+        assert!(validate_message_size(100_000_000, PUBSUB_MAX_MESSAGE_SIZE).is_err());
+    }
+
+    #[test]
+    fn test_message_size_constants() {
+        // Verify the constant values match expected sizes
+        assert_eq!(SQS_MAX_MESSAGE_SIZE, 262_144); // 256 KB
+        assert_eq!(PUBSUB_MAX_MESSAGE_SIZE, 10_485_760); // 10 MB
+    }
 }

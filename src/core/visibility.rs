@@ -144,4 +144,62 @@ mod tests {
         let manager = VisibilityManager::with_interval(backend, Duration::from_secs(10));
         assert_eq!(manager.check_interval, Duration::from_secs(10));
     }
+
+    #[tokio::test]
+    async fn test_process_expired_visibility_empty_queues() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let manager = VisibilityManager::new(backend);
+
+        // Should succeed even with no queues
+        let result = manager.process_expired_visibility().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_process_expired_visibility_with_queues() {
+        use crate::types::{QueueConfig, QueueType};
+
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+
+        // Create a test queue
+        let queue_config = QueueConfig {
+            id: "test-queue".to_string(),
+            name: "test-queue".to_string(),
+            queue_type: QueueType::SqsStandard,
+            visibility_timeout: 30,
+            message_retention_period: 345600,
+            max_message_size: 262144,
+            delay_seconds: 0,
+            dlq_config: None,
+            content_based_deduplication: false,
+            tags: std::collections::HashMap::new(),
+            redrive_allow_policy: None,
+        };
+        backend.create_queue(queue_config).await.unwrap();
+
+        let manager = VisibilityManager::new(backend);
+
+        // Should process the queue without error
+        let result = manager.process_expired_visibility().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_process_queue_expired_visibility() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let manager = VisibilityManager::new(backend);
+
+        // This is currently a placeholder, so it should just return Ok
+        let result = manager.process_queue_expired_visibility("test-queue").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_process_expired_messages_in_memory() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+
+        // This is currently a placeholder function
+        let result = process_expired_messages_in_memory(backend).await;
+        assert!(result.is_ok());
+    }
 }
