@@ -420,3 +420,821 @@ impl Publisher for PublisherService {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::memory::InMemoryBackend;
+    use crate::types::SubscriptionConfig;
+    use tonic::Request;
+
+    /// Create a test publisher service with in-memory backend.
+    fn create_test_service() -> PublisherService {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        PublisherService::new(backend)
+    }
+
+    // ========================================================================
+    // Helper Function Tests
+    // ========================================================================
+
+    #[test]
+    fn test_topic_to_queue_config_conversion() {
+        let topic = Topic {
+            name: "projects/test-project/topics/test-topic".to_string(),
+            labels: [("env".to_string(), "test".to_string())].into_iter().collect(),
+            message_retention_duration: Some(prost_types::Duration {
+                seconds: 86400,
+                nanos: 0,
+            }),
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+
+        let config = PublisherService::topic_to_queue_config(&topic).unwrap();
+
+        assert_eq!(config.id, "test-project:test-topic");
+        assert_eq!(config.name, "projects/test-project/topics/test-topic");
+        assert_eq!(config.queue_type, QueueType::PubSubTopic);
+        assert_eq!(config.message_retention_period, 86400);
+        assert_eq!(config.tags.get("env").unwrap(), "test");
+        assert_eq!(config.max_message_size, 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_queue_config_to_topic_conversion() {
+        let config = QueueConfig {
+            id: "test-project:test-topic".to_string(),
+            name: "projects/test-project/topics/test-topic".to_string(),
+            queue_type: QueueType::PubSubTopic,
+            visibility_timeout: 60,
+            message_retention_period: 604800,
+            max_message_size: 10 * 1024 * 1024,
+            delay_seconds: 0,
+            dlq_config: None,
+            content_based_deduplication: false,
+            tags: [("key".to_string(), "value".to_string())].into_iter().collect(),
+            redrive_allow_policy: None,
+        };
+
+        let topic = PublisherService::queue_config_to_topic(&config);
+
+        assert_eq!(topic.name, "projects/test-project/topics/test-topic");
+        assert_eq!(topic.labels.get("key").unwrap(), "value");
+        assert_eq!(topic.message_retention_duration.unwrap().seconds, 604800);
+    }
+
+    #[test]
+    fn test_pubsub_message_to_message_conversion() {
+        let pubsub_msg = PubsubMessage {
+            data: b"Hello world".to_vec(),
+            attributes: [("attr1".to_string(), "value1".to_string())].into_iter().collect(),
+            message_id: String::new(),
+            publish_time: None,
+            ordering_key: "order-key-1".to_string(),
+        };
+
+        let message = PublisherService::pubsub_message_to_message(&pubsub_msg, "topic:test");
+
+        // Body should be base64 encoded
+        let decoded = base64::engine::general_purpose::STANDARD.decode(&message.body).unwrap();
+        assert_eq!(decoded, b"Hello world");
+
+        assert_eq!(message.queue_id, "topic:test");
+        assert_eq!(message.message_group_id, Some("order-key-1".to_string()));
+        assert_eq!(message.attributes.get("attr1").unwrap().string_value.as_ref().unwrap(), "value1");
+        assert_eq!(message.receive_count, 0);
+    }
+
+    #[test]
+    fn test_pubsub_message_without_ordering_key() {
+        let pubsub_msg = PubsubMessage {
+            data: b"test".to_vec(),
+            attributes: Default::default(),
+            message_id: String::new(),
+            publish_time: None,
+            ordering_key: String::new(), // Empty ordering key
+        };
+
+        let message = PublisherService::pubsub_message_to_message(&pubsub_msg, "topic:test");
+
+        assert!(message.message_group_id.is_none());
+    }
+
+    // ========================================================================
+    // CreateTopic Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_create_topic_success() {
+        let service = create_test_service();
+
+        let topic = Topic {
+            name: "projects/test-project/topics/my-topic".to_string(),
+            labels: [("env".to_string(), "dev".to_string())].into_iter().collect(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+
+        let request = Request::new(topic.clone());
+        let response = service.create_topic(request).await.unwrap();
+        let created_topic = response.into_inner();
+
+        assert_eq!(created_topic.name, "projects/test-project/topics/my-topic");
+        assert_eq!(created_topic.labels.get("env").unwrap(), "dev");
+    }
+
+    #[tokio::test]
+    async fn test_create_topic_already_exists() {
+        let service = create_test_service();
+
+        let topic = Topic {
+            name: "projects/test-project/topics/duplicate-topic".to_string(),
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+
+        // Create first time
+        let request = Request::new(topic.clone());
+        service.create_topic(request).await.unwrap();
+
+        // Create again (should fail)
+        let request = Request::new(topic);
+        let result = service.create_topic(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::AlreadyExists);
+    }
+
+    #[tokio::test]
+    async fn test_create_topic_invalid_name() {
+        let service = create_test_service();
+
+        let topic = Topic {
+            name: "invalid-topic-name".to_string(), // Invalid format
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+
+        let request = Request::new(topic);
+        let result = service.create_topic(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn test_create_topic_invalid_id() {
+        let service = create_test_service();
+
+        let topic = Topic {
+            name: "projects/test-project/topics/123invalid".to_string(), // Topic ID starts with number
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+
+        let request = Request::new(topic);
+        let result = service.create_topic(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    // ========================================================================
+    // UpdateTopic Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_update_topic_success() {
+        let service = create_test_service();
+
+        // Create topic first
+        let topic = Topic {
+            name: "projects/test-project/topics/update-topic".to_string(),
+            labels: [("version".to_string(), "v1".to_string())].into_iter().collect(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+        let request = Request::new(topic);
+        service.create_topic(request).await.unwrap();
+
+        // Update with new labels
+        let updated_topic = Topic {
+            name: "projects/test-project/topics/update-topic".to_string(),
+            labels: [("version".to_string(), "v2".to_string())].into_iter().collect(),
+            message_retention_duration: Some(prost_types::Duration {
+                seconds: 172800,
+                nanos: 0,
+            }),
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+
+        let update_request = UpdateTopicRequest {
+            topic: Some(updated_topic),
+            update_mask: None,
+        };
+
+        let request = Request::new(update_request);
+        let response = service.update_topic(request).await.unwrap();
+        let result_topic = response.into_inner();
+
+        assert_eq!(result_topic.labels.get("version").unwrap(), "v2");
+        assert_eq!(result_topic.message_retention_duration.unwrap().seconds, 172800);
+    }
+
+    #[tokio::test]
+    async fn test_update_topic_missing_topic() {
+        let service = create_test_service();
+
+        let update_request = UpdateTopicRequest {
+            topic: None, // Missing topic
+            update_mask: None,
+        };
+
+        let request = Request::new(update_request);
+        let result = service.update_topic(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    // ========================================================================
+    // GetTopic Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_topic_success() {
+        let service = create_test_service();
+
+        // Create topic first
+        let topic = Topic {
+            name: "projects/test-project/topics/get-topic".to_string(),
+            labels: [("key".to_string(), "value".to_string())].into_iter().collect(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+        let request = Request::new(topic);
+        service.create_topic(request).await.unwrap();
+
+        // Get topic
+        let get_request = GetTopicRequest {
+            topic: "projects/test-project/topics/get-topic".to_string(),
+        };
+
+        let request = Request::new(get_request);
+        let response = service.get_topic(request).await.unwrap();
+        let retrieved_topic = response.into_inner();
+
+        assert_eq!(retrieved_topic.name, "projects/test-project/topics/get-topic");
+        assert_eq!(retrieved_topic.labels.get("key").unwrap(), "value");
+    }
+
+    #[tokio::test]
+    async fn test_get_topic_not_found() {
+        let service = create_test_service();
+
+        let get_request = GetTopicRequest {
+            topic: "projects/test-project/topics/nonexistent".to_string(),
+        };
+
+        let request = Request::new(get_request);
+        let result = service.get_topic(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_get_topic_invalid_name() {
+        let service = create_test_service();
+
+        let get_request = GetTopicRequest {
+            topic: "invalid-format".to_string(),
+        };
+
+        let request = Request::new(get_request);
+        let result = service.get_topic(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    // ========================================================================
+    // ListTopics Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_list_topics_empty() {
+        let service = create_test_service();
+
+        let list_request = ListTopicsRequest {
+            project: "projects/test-project".to_string(),
+            page_size: 0,
+            page_token: String::new(),
+        };
+
+        let request = Request::new(list_request);
+        let response = service.list_topics(request).await.unwrap();
+        let list_response = response.into_inner();
+
+        assert_eq!(list_response.topics.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_list_topics_with_data() {
+        let service = create_test_service();
+
+        // Create two topics
+        let topic1 = Topic {
+            name: "projects/test-project/topics/topic1".to_string(),
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+        service.create_topic(Request::new(topic1)).await.unwrap();
+
+        let topic2 = Topic {
+            name: "projects/test-project/topics/topic2".to_string(),
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+        service.create_topic(Request::new(topic2)).await.unwrap();
+
+        // List topics
+        let list_request = ListTopicsRequest {
+            project: "projects/test-project".to_string(),
+            page_size: 0,
+            page_token: String::new(),
+        };
+
+        let request = Request::new(list_request);
+        let response = service.list_topics(request).await.unwrap();
+        let list_response = response.into_inner();
+
+        assert_eq!(list_response.topics.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_list_topics_filters_by_project() {
+        let service = create_test_service();
+
+        // Create topics in different projects
+        let topic_a = Topic {
+            name: "projects/project-a/topics/topic1".to_string(),
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+        service.create_topic(Request::new(topic_a)).await.unwrap();
+
+        let topic_b = Topic {
+            name: "projects/project-b/topics/topic2".to_string(),
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+        service.create_topic(Request::new(topic_b)).await.unwrap();
+
+        // List topics for project-a only
+        let list_request = ListTopicsRequest {
+            project: "projects/project-a".to_string(),
+            page_size: 0,
+            page_token: String::new(),
+        };
+
+        let request = Request::new(list_request);
+        let response = service.list_topics(request).await.unwrap();
+        let list_response = response.into_inner();
+
+        assert_eq!(list_response.topics.len(), 1);
+        assert!(list_response.topics[0].name.contains("project-a"));
+    }
+
+    // ========================================================================
+    // Publish Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_publish_success_no_subscriptions() {
+        let service = create_test_service();
+
+        // Create topic
+        let topic = Topic {
+            name: "projects/test-project/topics/pub-topic".to_string(),
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+        service.create_topic(Request::new(topic)).await.unwrap();
+
+        // Publish messages (no subscriptions)
+        let publish_request = PublishRequest {
+            topic: "projects/test-project/topics/pub-topic".to_string(),
+            messages: vec![
+                PubsubMessage {
+                    data: b"Message 1".to_vec(),
+                    attributes: Default::default(),
+                    message_id: String::new(),
+                    publish_time: None,
+                    ordering_key: String::new(),
+                },
+            ],
+        };
+
+        let request = Request::new(publish_request);
+        let response = service.publish(request).await.unwrap();
+        let publish_response = response.into_inner();
+
+        assert_eq!(publish_response.message_ids.len(), 1);
+        assert!(!publish_response.message_ids[0].is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_publish_with_subscription_fanout() {
+        let service = create_test_service();
+
+        // Create topic
+        let topic = Topic {
+            name: "projects/test-project/topics/fanout-topic".to_string(),
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+        service.create_topic(Request::new(topic)).await.unwrap();
+
+        // Create backing queue for subscription (subscriptions have their own message storage)
+        let sub_queue_config = QueueConfig {
+            id: "test-project:test-sub".to_string(),
+            name: "projects/test-project/subscriptions/test-sub".to_string(),
+            queue_type: QueueType::PubSubTopic,
+            visibility_timeout: 60,
+            message_retention_period: 604800,
+            max_message_size: 10 * 1024 * 1024,
+            delay_seconds: 0,
+            dlq_config: None,
+            content_based_deduplication: false,
+            tags: Default::default(),
+            redrive_allow_policy: None,
+        };
+        service.backend.create_queue(sub_queue_config).await.unwrap();
+
+        // Create subscription for the topic
+        let sub_config = SubscriptionConfig {
+            id: "test-project:test-sub".to_string(),
+            name: "projects/test-project/subscriptions/test-sub".to_string(),
+            topic_id: "test-project:fanout-topic".to_string(),
+            ack_deadline_seconds: 10,
+            message_retention_duration: 604800,
+            enable_message_ordering: false,
+            filter: None,
+            dead_letter_policy: None,
+        };
+        service.backend.create_subscription(sub_config).await.unwrap();
+
+        // Publish messages
+        let publish_request = PublishRequest {
+            topic: "projects/test-project/topics/fanout-topic".to_string(),
+            messages: vec![
+                PubsubMessage {
+                    data: b"Fanout message".to_vec(),
+                    attributes: [("key".to_string(), "value".to_string())].into_iter().collect(),
+                    message_id: String::new(),
+                    publish_time: None,
+                    ordering_key: String::new(),
+                },
+            ],
+        };
+
+        let request = Request::new(publish_request);
+        let response = service.publish(request).await.unwrap();
+        let publish_response = response.into_inner();
+
+        assert_eq!(publish_response.message_ids.len(), 1);
+
+        // Verify message was fanned out to subscription
+        let messages = service.backend
+            .receive_messages("test-project:test-sub", crate::types::ReceiveOptions {
+                max_messages: 10,
+                visibility_timeout: Some(30),
+                wait_time_seconds: 0,
+                attribute_names: vec![],
+                message_attribute_names: vec![],
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(messages.len(), 1);
+        let decoded = base64::engine::general_purpose::STANDARD.decode(&messages[0].message.body).unwrap();
+        assert_eq!(decoded, b"Fanout message");
+    }
+
+    #[tokio::test]
+    async fn test_publish_topic_not_found() {
+        let service = create_test_service();
+
+        let publish_request = PublishRequest {
+            topic: "projects/test-project/topics/nonexistent".to_string(),
+            messages: vec![
+                PubsubMessage {
+                    data: b"test".to_vec(),
+                    attributes: Default::default(),
+                    message_id: String::new(),
+                    publish_time: None,
+                    ordering_key: String::new(),
+                },
+            ],
+        };
+
+        let request = Request::new(publish_request);
+        let result = service.publish(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_publish_with_ordering_key() {
+        let service = create_test_service();
+
+        // Create topic
+        let topic = Topic {
+            name: "projects/test-project/topics/ordered-topic".to_string(),
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+        service.create_topic(Request::new(topic)).await.unwrap();
+
+        // Publish messages with ordering key
+        let publish_request = PublishRequest {
+            topic: "projects/test-project/topics/ordered-topic".to_string(),
+            messages: vec![
+                PubsubMessage {
+                    data: b"Ordered message".to_vec(),
+                    attributes: Default::default(),
+                    message_id: String::new(),
+                    publish_time: None,
+                    ordering_key: "order-key-1".to_string(),
+                },
+            ],
+        };
+
+        let request = Request::new(publish_request);
+        let response = service.publish(request).await.unwrap();
+        let publish_response = response.into_inner();
+
+        assert_eq!(publish_response.message_ids.len(), 1);
+    }
+
+    // ========================================================================
+    // ListTopicSubscriptions Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_list_topic_subscriptions_empty() {
+        let service = create_test_service();
+
+        // Create topic
+        let topic = Topic {
+            name: "projects/test-project/topics/list-sub-topic".to_string(),
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+        service.create_topic(Request::new(topic)).await.unwrap();
+
+        // List subscriptions (should be empty)
+        let list_request = ListTopicSubscriptionsRequest {
+            topic: "projects/test-project/topics/list-sub-topic".to_string(),
+            page_size: 0,
+            page_token: String::new(),
+        };
+
+        let request = Request::new(list_request);
+        let response = service.list_topic_subscriptions(request).await.unwrap();
+        let list_response = response.into_inner();
+
+        assert_eq!(list_response.subscriptions.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_list_topic_subscriptions_with_data() {
+        let service = create_test_service();
+
+        // Create topic
+        let topic = Topic {
+            name: "projects/test-project/topics/list-sub-topic2".to_string(),
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+        service.create_topic(Request::new(topic)).await.unwrap();
+
+        // Create two subscriptions
+        let sub1 = SubscriptionConfig {
+            id: "test-project:sub1".to_string(),
+            name: "projects/test-project/subscriptions/sub1".to_string(),
+            topic_id: "test-project:list-sub-topic2".to_string(),
+            ack_deadline_seconds: 10,
+            message_retention_duration: 604800,
+            enable_message_ordering: false,
+            filter: None,
+            dead_letter_policy: None,
+        };
+        service.backend.create_subscription(sub1).await.unwrap();
+
+        let sub2 = SubscriptionConfig {
+            id: "test-project:sub2".to_string(),
+            name: "projects/test-project/subscriptions/sub2".to_string(),
+            topic_id: "test-project:list-sub-topic2".to_string(),
+            ack_deadline_seconds: 10,
+            message_retention_duration: 604800,
+            enable_message_ordering: false,
+            filter: None,
+            dead_letter_policy: None,
+        };
+        service.backend.create_subscription(sub2).await.unwrap();
+
+        // List subscriptions
+        let list_request = ListTopicSubscriptionsRequest {
+            topic: "projects/test-project/topics/list-sub-topic2".to_string(),
+            page_size: 0,
+            page_token: String::new(),
+        };
+
+        let request = Request::new(list_request);
+        let response = service.list_topic_subscriptions(request).await.unwrap();
+        let list_response = response.into_inner();
+
+        assert_eq!(list_response.subscriptions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_list_topic_subscriptions_topic_not_found() {
+        let service = create_test_service();
+
+        let list_request = ListTopicSubscriptionsRequest {
+            topic: "projects/test-project/topics/nonexistent".to_string(),
+            page_size: 0,
+            page_token: String::new(),
+        };
+
+        let request = Request::new(list_request);
+        let result = service.list_topic_subscriptions(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+    }
+
+    // ========================================================================
+    // DeleteTopic Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_delete_topic_success() {
+        let service = create_test_service();
+
+        // Create topic
+        let topic = Topic {
+            name: "projects/test-project/topics/delete-topic".to_string(),
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+        service.create_topic(Request::new(topic)).await.unwrap();
+
+        // Delete topic
+        let delete_request = DeleteTopicRequest {
+            topic: "projects/test-project/topics/delete-topic".to_string(),
+        };
+
+        let request = Request::new(delete_request);
+        let response = service.delete_topic(request).await;
+
+        assert!(response.is_ok());
+
+        // Verify topic is deleted
+        let get_request = GetTopicRequest {
+            topic: "projects/test-project/topics/delete-topic".to_string(),
+        };
+        let result = service.get_topic(Request::new(get_request)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_delete_topic_not_found() {
+        let service = create_test_service();
+
+        let delete_request = DeleteTopicRequest {
+            topic: "projects/test-project/topics/nonexistent".to_string(),
+        };
+
+        let request = Request::new(delete_request);
+        let result = service.delete_topic(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_delete_topic_invalid_name() {
+        let service = create_test_service();
+
+        let delete_request = DeleteTopicRequest {
+            topic: "invalid-format".to_string(),
+        };
+
+        let request = Request::new(delete_request);
+        let result = service.delete_topic(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    // ========================================================================
+    // DetachSubscription Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_detach_subscription_unimplemented() {
+        let service = create_test_service();
+
+        let detach_request = DetachSubscriptionRequest {
+            subscription: "projects/test-project/subscriptions/test-sub".to_string(),
+        };
+
+        let request = Request::new(detach_request);
+        let result = service.detach_subscription(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unimplemented);
+    }
+}
+
