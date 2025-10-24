@@ -1034,3 +1034,1073 @@ async fn modify_ack_deadline(
 
     Ok(StatusCode::OK)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::memory::InMemoryBackend;
+    use axum::body::Body;
+    use axum::http::{Method, Request, StatusCode};
+    use ::base64::Engine as _;
+    use ::base64::engine::general_purpose;
+    use tower::ServiceExt; // for oneshot()
+
+    /// Create a test state with an in-memory backend.
+    fn create_test_state() -> RestState {
+        let backend = Arc::new(InMemoryBackend::new());
+        RestState::new(backend)
+    }
+
+    /// Helper to create a test app with the REST router.
+    fn create_test_app() -> Router {
+        let state = create_test_state();
+        create_router(state)
+    }
+
+    /// Helper to send a request and get the response.
+    async fn send_request(
+        app: Router,
+        method: Method,
+        uri: &str,
+        body: Option<serde_json::Value>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut request = Request::builder().method(method).uri(uri);
+
+        let body_bytes = if let Some(json) = body {
+            request = request.header("content-type", "application/json");
+            serde_json::to_vec(&json).unwrap()
+        } else {
+            Vec::new()
+        };
+
+        let request = request.body(Body::from(body_bytes)).unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        let status = response.status();
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body_json: serde_json::Value = if body_bytes.is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_slice(&body_bytes).unwrap_or(serde_json::json!({}))
+        };
+
+        (status, body_json)
+    }
+
+    // ========================================================================
+    // Topic Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_create_topic_success() {
+        let app = create_test_app();
+
+        let body = serde_json::json!({
+            "labels": {"env": "test"}
+        });
+
+        let (status, response) = send_request(
+            app,
+            Method::PUT,
+            "/v1/projects/test-project/topics/test-topic",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            response["name"],
+            "projects/test-project/topics/test-topic"
+        );
+        assert_eq!(response["labels"]["env"], "test");
+    }
+
+    #[tokio::test]
+    async fn test_create_topic_invalid_id() {
+        let app = create_test_app();
+
+        let body = serde_json::json!({});
+
+        // Topic ID "123" starts with a number (invalid)
+        let (status, response) = send_request(
+            app,
+            Method::PUT,
+            "/v1/projects/test-project/topics/123invalid",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid topic ID"));
+    }
+
+    #[tokio::test]
+    async fn test_create_topic_duplicate() {
+        let app = create_test_app();
+
+        let body = serde_json::json!({});
+
+        // Create first time
+        let (status, _) = send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/dup-topic",
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Create again (should fail)
+        let (status, response) = send_request(
+            app,
+            Method::PUT,
+            "/v1/projects/test-project/topics/dup-topic",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("already exists"));
+    }
+
+    #[tokio::test]
+    async fn test_get_topic_success() {
+        let app = create_test_app();
+
+        // Create topic first
+        let body = serde_json::json!({});
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/get-topic",
+            Some(body),
+        )
+        .await;
+
+        // Get topic
+        let (status, response) = send_request(
+            app,
+            Method::GET,
+            "/v1/projects/test-project/topics/get-topic",
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["name"], "projects/test-project/topics/get-topic");
+    }
+
+    #[tokio::test]
+    async fn test_get_topic_not_found() {
+        let app = create_test_app();
+
+        let (status, response) = send_request(
+            app,
+            Method::GET,
+            "/v1/projects/test-project/topics/nonexistent",
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_delete_topic_success() {
+        let app = create_test_app();
+
+        // Create topic first
+        let body = serde_json::json!({});
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/del-topic",
+            Some(body),
+        )
+        .await;
+
+        // Delete topic
+        let (status, _) = send_request(
+            app,
+            Method::DELETE,
+            "/v1/projects/test-project/topics/del-topic",
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn test_delete_topic_not_found() {
+        let app = create_test_app();
+
+        let (status, response) = send_request(
+            app,
+            Method::DELETE,
+            "/v1/projects/test-project/topics/nonexistent",
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_list_topics_empty() {
+        let app = create_test_app();
+
+        let (status, response) =
+            send_request(app, Method::GET, "/v1/projects/test-project/topics", None).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["topics"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_list_topics_with_data() {
+        let app = create_test_app();
+
+        // Create two topics
+        let body = serde_json::json!({});
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/topic1",
+            Some(body.clone()),
+        )
+        .await;
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/topic2",
+            Some(body),
+        )
+        .await;
+
+        // List topics
+        let (status, response) =
+            send_request(app, Method::GET, "/v1/projects/test-project/topics", None).await;
+
+        assert_eq!(status, StatusCode::OK);
+        let topics = response["topics"].as_array().unwrap();
+        assert_eq!(topics.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_list_topics_filters_by_project() {
+        let app = create_test_app();
+
+        // Create topics in different projects
+        let body = serde_json::json!({});
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/project-a/topics/topic1",
+            Some(body.clone()),
+        )
+        .await;
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/project-b/topics/topic2",
+            Some(body),
+        )
+        .await;
+
+        // List topics for project-a only
+        let (status, response) =
+            send_request(app, Method::GET, "/v1/projects/project-a/topics", None).await;
+
+        assert_eq!(status, StatusCode::OK);
+        let topics = response["topics"].as_array().unwrap();
+        assert_eq!(topics.len(), 1);
+        assert!(topics[0]["name"]
+            .as_str()
+            .unwrap()
+            .contains("project-a"));
+    }
+
+    #[tokio::test]
+    async fn test_publish_success() {
+        let app = create_test_app();
+
+        // Create topic first
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/pub-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        // Publish messages
+        let data = general_purpose::STANDARD.encode("Hello world");
+        let body = serde_json::json!({
+            "messages": [
+                {
+                    "data": data,
+                    "attributes": {"key1": "value1"}
+                }
+            ]
+        });
+
+        let (status, response) = send_request(
+            app,
+            Method::POST,
+            "/v1/projects/test-project/topics/pub-topic:publish",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let message_ids = response["messageIds"].as_array().unwrap();
+        assert_eq!(message_ids.len(), 1);
+        assert!(!message_ids[0].as_str().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_publish_topic_not_found() {
+        let app = create_test_app();
+
+        let data = general_purpose::STANDARD.encode("Hello");
+        let body = serde_json::json!({
+            "messages": [{"data": data}]
+        });
+
+        let (status, response) = send_request(
+            app,
+            Method::POST,
+            "/v1/projects/test-project/topics/nonexistent:publish",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_publish_with_ordering_key() {
+        let app = create_test_app();
+
+        // Create topic
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/ordered-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        // Publish with ordering key
+        let data = general_purpose::STANDARD.encode("Ordered message");
+        let body = serde_json::json!({
+            "messages": [
+                {
+                    "data": data,
+                    "orderingKey": "order-key-1"
+                }
+            ]
+        });
+
+        let (status, response) = send_request(
+            app,
+            Method::POST,
+            "/v1/projects/test-project/topics/ordered-topic:publish",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["messageIds"].as_array().unwrap().len(), 1);
+    }
+
+    // ========================================================================
+    // Subscription Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_create_subscription_success() {
+        let app = create_test_app();
+
+        // Create topic first
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/sub-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        // Create subscription
+        let body = serde_json::json!({
+            "topic": "projects/test-project/topics/sub-topic",
+            "ackDeadlineSeconds": 30
+        });
+
+        let (status, response) = send_request(
+            app,
+            Method::PUT,
+            "/v1/projects/test-project/subscriptions/test-sub",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            response["name"],
+            "projects/test-project/subscriptions/test-sub"
+        );
+        assert_eq!(
+            response["topic"],
+            "projects/test-project/topics/sub-topic"
+        );
+        assert_eq!(response["ackDeadlineSeconds"], 30);
+    }
+
+    #[tokio::test]
+    async fn test_create_subscription_invalid_id() {
+        let app = create_test_app();
+
+        let body = serde_json::json!({
+            "topic": "projects/test-project/topics/some-topic"
+        });
+
+        // Subscription ID "123" starts with a number (invalid)
+        let (status, response) = send_request(
+            app,
+            Method::PUT,
+            "/v1/projects/test-project/subscriptions/123invalid",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid subscription ID"));
+    }
+
+    #[tokio::test]
+    async fn test_create_subscription_topic_not_found() {
+        let app = create_test_app();
+
+        let body = serde_json::json!({
+            "topic": "projects/test-project/topics/nonexistent"
+        });
+
+        let (status, response) = send_request(
+            app,
+            Method::PUT,
+            "/v1/projects/test-project/subscriptions/test-sub",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_create_subscription_invalid_topic_format() {
+        let app = create_test_app();
+
+        let body = serde_json::json!({
+            "topic": "invalid-topic-format"
+        });
+
+        let (status, response) = send_request(
+            app,
+            Method::PUT,
+            "/v1/projects/test-project/subscriptions/test-sub",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid topic name"));
+    }
+
+    #[tokio::test]
+    async fn test_get_subscription_success() {
+        let app = create_test_app();
+
+        // Create topic and subscription
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/sub-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        let body = serde_json::json!({
+            "topic": "projects/test-project/topics/sub-topic"
+        });
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/subscriptions/get-sub",
+            Some(body),
+        )
+        .await;
+
+        // Get subscription
+        let (status, response) = send_request(
+            app,
+            Method::GET,
+            "/v1/projects/test-project/subscriptions/get-sub",
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            response["name"],
+            "projects/test-project/subscriptions/get-sub"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_subscription_not_found() {
+        let app = create_test_app();
+
+        let (status, response) = send_request(
+            app,
+            Method::GET,
+            "/v1/projects/test-project/subscriptions/nonexistent",
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_delete_subscription_success() {
+        let app = create_test_app();
+
+        // Create topic and subscription
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/sub-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        let body = serde_json::json!({
+            "topic": "projects/test-project/topics/sub-topic"
+        });
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/subscriptions/del-sub",
+            Some(body),
+        )
+        .await;
+
+        // Delete subscription
+        let (status, _) = send_request(
+            app,
+            Method::DELETE,
+            "/v1/projects/test-project/subscriptions/del-sub",
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn test_delete_subscription_not_found() {
+        let app = create_test_app();
+
+        let (status, response) = send_request(
+            app,
+            Method::DELETE,
+            "/v1/projects/test-project/subscriptions/nonexistent",
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_list_subscriptions_empty() {
+        let app = create_test_app();
+
+        let (status, response) = send_request(
+            app,
+            Method::GET,
+            "/v1/projects/test-project/subscriptions",
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["subscriptions"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_list_subscriptions_with_data() {
+        let app = create_test_app();
+
+        // Create topic
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/list-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        // Create two subscriptions
+        let body = serde_json::json!({
+            "topic": "projects/test-project/topics/list-topic"
+        });
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/subscriptions/sub1",
+            Some(body.clone()),
+        )
+        .await;
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/subscriptions/sub2",
+            Some(body),
+        )
+        .await;
+
+        // List subscriptions
+        let (status, response) = send_request(
+            app,
+            Method::GET,
+            "/v1/projects/test-project/subscriptions",
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let subs = response["subscriptions"].as_array().unwrap();
+        assert_eq!(subs.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_list_subscriptions_filters_by_project() {
+        let app = create_test_app();
+
+        // Create topics in different projects
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/project-a/topics/topic-a",
+            Some(serde_json::json!({})),
+        )
+        .await;
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/project-b/topics/topic-b",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        // Create subscriptions in different projects
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/project-a/subscriptions/sub-a",
+            Some(serde_json::json!({
+                "topic": "projects/project-a/topics/topic-a"
+            })),
+        )
+        .await;
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/project-b/subscriptions/sub-b",
+            Some(serde_json::json!({
+                "topic": "projects/project-b/topics/topic-b"
+            })),
+        )
+        .await;
+
+        // List subscriptions for project-a only
+        let (status, response) = send_request(
+            app,
+            Method::GET,
+            "/v1/projects/project-a/subscriptions",
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let subs = response["subscriptions"].as_array().unwrap();
+        assert_eq!(subs.len(), 1);
+        assert!(subs[0]["name"]
+            .as_str()
+            .unwrap()
+            .contains("project-a"));
+    }
+
+    #[tokio::test]
+    async fn test_pull_empty_queue() {
+        let app = create_test_app();
+
+        // Create topic and subscription
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/pull-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/subscriptions/pull-sub",
+            Some(serde_json::json!({
+                "topic": "projects/test-project/topics/pull-topic"
+            })),
+        )
+        .await;
+
+        // Pull messages (should be empty)
+        let body = serde_json::json!({
+            "maxMessages": 10
+        });
+
+        let (status, response) = send_request(
+            app,
+            Method::POST,
+            "/v1/projects/test-project/subscriptions/pull-sub:pull",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(response["receivedMessages"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_pull_with_messages() {
+        let app = create_test_app();
+
+        // Create topic and subscription
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/pull-topic2",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/subscriptions/pull-sub2",
+            Some(serde_json::json!({
+                "topic": "projects/test-project/topics/pull-topic2"
+            })),
+        )
+        .await;
+
+        // Publish a message
+        let data = general_purpose::STANDARD.encode("Test message");
+        send_request(
+            app.clone(),
+            Method::POST,
+            "/v1/projects/test-project/topics/pull-topic2:publish",
+            Some(serde_json::json!({
+                "messages": [{"data": data}]
+            })),
+        )
+        .await;
+
+        // Pull messages
+        let body = serde_json::json!({
+            "maxMessages": 10
+        });
+
+        let (status, response) = send_request(
+            app,
+            Method::POST,
+            "/v1/projects/test-project/subscriptions/pull-sub2:pull",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let received = response["receivedMessages"].as_array().unwrap();
+        assert_eq!(received.len(), 1);
+        assert!(!received[0]["ackId"].as_str().unwrap().is_empty());
+        assert!(!received[0]["message"]["messageId"]
+            .as_str()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_acknowledge_messages() {
+        let app = create_test_app();
+
+        // Create topic and subscription
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/ack-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/subscriptions/ack-sub",
+            Some(serde_json::json!({
+                "topic": "projects/test-project/topics/ack-topic"
+            })),
+        )
+        .await;
+
+        // Publish and pull a message
+        let data = general_purpose::STANDARD.encode("Ack test");
+        send_request(
+            app.clone(),
+            Method::POST,
+            "/v1/projects/test-project/topics/ack-topic:publish",
+            Some(serde_json::json!({
+                "messages": [{"data": data}]
+            })),
+        )
+        .await;
+
+        let (_, pull_response) = send_request(
+            app.clone(),
+            Method::POST,
+            "/v1/projects/test-project/subscriptions/ack-sub:pull",
+            Some(serde_json::json!({"maxMessages": 1})),
+        )
+        .await;
+
+        let ack_id = pull_response["receivedMessages"][0]["ackId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Acknowledge the message
+        let body = serde_json::json!({
+            "ackIds": [ack_id]
+        });
+
+        let (status, _) = send_request(
+            app.clone(),
+            Method::POST,
+            "/v1/projects/test-project/subscriptions/ack-sub:acknowledge",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+
+        // Pull again - should be empty now
+        let (_, pull_response2) = send_request(
+            app,
+            Method::POST,
+            "/v1/projects/test-project/subscriptions/ack-sub:pull",
+            Some(serde_json::json!({"maxMessages": 1})),
+        )
+        .await;
+
+        assert!(pull_response2["receivedMessages"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_modify_ack_deadline() {
+        let app = create_test_app();
+
+        // Create topic and subscription
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/topics/modify-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test-project/subscriptions/modify-sub",
+            Some(serde_json::json!({
+                "topic": "projects/test-project/topics/modify-topic"
+            })),
+        )
+        .await;
+
+        // Publish and pull a message
+        let data = general_purpose::STANDARD.encode("Modify test");
+        send_request(
+            app.clone(),
+            Method::POST,
+            "/v1/projects/test-project/topics/modify-topic:publish",
+            Some(serde_json::json!({
+                "messages": [{"data": data}]
+            })),
+        )
+        .await;
+
+        let (_, pull_response) = send_request(
+            app.clone(),
+            Method::POST,
+            "/v1/projects/test-project/subscriptions/modify-sub:pull",
+            Some(serde_json::json!({"maxMessages": 1})),
+        )
+        .await;
+
+        let ack_id = pull_response["receivedMessages"][0]["ackId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Modify ack deadline
+        let body = serde_json::json!({
+            "ackIds": [ack_id],
+            "ackDeadlineSeconds": 60
+        });
+
+        let (status, _) = send_request(
+            app,
+            Method::POST,
+            "/v1/projects/test-project/subscriptions/modify-sub:modifyAckDeadline",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    // ========================================================================
+    // Error Response Tests
+    // ========================================================================
+
+    #[test]
+    fn test_error_response_formatting() {
+        let err = ErrorResponse::new(StatusCode::BAD_REQUEST, "Test error");
+        assert_eq!(err.error.code, 400);
+        assert_eq!(err.error.message, "Test error");
+        assert_eq!(err.error.status, "INVALID_ARGUMENT");
+
+        let err = ErrorResponse::new(StatusCode::NOT_FOUND, "Not found");
+        assert_eq!(err.error.status, "NOT_FOUND");
+
+        let err = ErrorResponse::new(StatusCode::CONFLICT, "Conflict");
+        assert_eq!(err.error.status, "ALREADY_EXISTS");
+    }
+
+    // ========================================================================
+    // Conversion Tests
+    // ========================================================================
+
+    #[test]
+    fn test_topic_to_queue_config_conversion() {
+        let topic = Topic {
+            name: Some("projects/test/topics/my-topic".to_string()),
+            labels: Some([("key".to_string(), "value".to_string())].into()),
+            message_retention_duration: Some("86400s".to_string()),
+        };
+
+        let config = RestState::topic_to_queue_config(&topic, "test", "my-topic").unwrap();
+        assert_eq!(config.id, "test:my-topic");
+        assert_eq!(config.name, "projects/test/topics/my-topic");
+        assert_eq!(config.message_retention_period, 86400);
+        assert_eq!(config.tags.get("key").unwrap(), "value");
+    }
+
+    #[test]
+    fn test_queue_config_to_topic_conversion() {
+        use crate::types::QueueConfig;
+
+        let config = QueueConfig {
+            id: "test:my-topic".to_string(),
+            name: "projects/test/topics/my-topic".to_string(),
+            queue_type: crate::types::QueueType::PubSubTopic,
+            visibility_timeout: 60,
+            message_retention_period: 86400,
+            max_message_size: 10 * 1024 * 1024,
+            delay_seconds: 0,
+            dlq_config: None,
+            content_based_deduplication: false,
+            tags: [("key".to_string(), "value".to_string())].into(),
+            redrive_allow_policy: None,
+        };
+
+        let topic = RestState::queue_config_to_topic(&config);
+        assert_eq!(topic.name.unwrap(), "projects/test/topics/my-topic");
+        assert_eq!(topic.labels.unwrap().get("key").unwrap(), "value");
+        assert_eq!(topic.message_retention_duration.unwrap(), "86400s");
+    }
+
+    #[test]
+    fn test_pubsub_message_base64_encoding() {
+        use crate::types::{Message, MessageId};
+        use chrono::Utc;
+
+        let msg = Message {
+            id: MessageId::new(),
+            body: general_purpose::STANDARD.encode(b"test"),
+            attributes: Default::default(),
+            queue_id: "test:topic".to_string(),
+            sent_timestamp: Utc::now(),
+            receive_count: 0,
+            message_group_id: None,
+            deduplication_id: None,
+            sequence_number: None,
+            delay_seconds: None,
+        };
+
+        let pubsub_msg = RestState::message_to_pubsub_message(&msg);
+        assert_eq!(pubsub_msg.data, b"test");
+    }
+}

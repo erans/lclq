@@ -327,7 +327,7 @@ impl StorageBackend for InMemoryBackend {
         let mut queues = self.inner.queues.write().await;
 
         if queues.contains_key(&config.id) {
-            return Err(Error::StorageError(format!("Queue {} already exists", config.id)));
+            return Err(Error::QueueAlreadyExists(config.id.clone()));
         }
 
         let queue_data = QueueData {
