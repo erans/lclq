@@ -655,4 +655,370 @@ mod tests {
         assert_eq!(entries[1].id, "msg2");
         assert_eq!(entries[1].message_body, "World");
     }
+
+    // ========================================================================
+    // JSON Request Parsing Tests (parse_json method)
+    // ========================================================================
+
+    #[test]
+    fn test_parse_json_create_queue() {
+        use axum::http::HeaderMap;
+
+        let json_body = r#"{"QueueName": "test-queue"}"#;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-amz-target", "AmazonSQS.CreateQueue".parse().unwrap());
+
+        let req = SqsRequest::parse_with_headers(json_body, &headers).unwrap();
+
+        assert_eq!(req.action, SqsAction::CreateQueue);
+        assert_eq!(req.get_param("QueueName"), Some("test-queue"));
+        assert!(req.is_json);
+    }
+
+    #[test]
+    fn test_parse_json_send_message() {
+        use axum::http::HeaderMap;
+
+        let json_body = r#"{
+            "QueueUrl": "http://localhost:9324/queue/test",
+            "MessageBody": "Hello JSON World"
+        }"#;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-amz-target", "AmazonSQS.SendMessage".parse().unwrap());
+
+        let req = SqsRequest::parse_with_headers(json_body, &headers).unwrap();
+
+        assert_eq!(req.action, SqsAction::SendMessage);
+        assert_eq!(req.get_param("QueueUrl"), Some("http://localhost:9324/queue/test"));
+        assert_eq!(req.get_param("MessageBody"), Some("Hello JSON World"));
+    }
+
+    #[test]
+    fn test_parse_json_with_message_attributes() {
+        use axum::http::HeaderMap;
+
+        let json_body = r#"{
+            "QueueUrl": "http://localhost:9324/queue/test",
+            "MessageBody": "Test",
+            "MessageAttributes": {
+                "attr1": {
+                    "DataType": "String",
+                    "StringValue": "value1"
+                },
+                "attr2": {
+                    "DataType": "Number",
+                    "StringValue": "123"
+                }
+            }
+        }"#;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-amz-target", "AmazonSQS.SendMessage".parse().unwrap());
+
+        let req = SqsRequest::parse_with_headers(json_body, &headers).unwrap();
+        let attrs = req.parse_message_attributes();
+
+        assert_eq!(attrs.len(), 2);
+        assert_eq!(attrs.get("attr1").unwrap().data_type, "String");
+        assert_eq!(attrs.get("attr1").unwrap().string_value, Some("value1".to_string()));
+        assert_eq!(attrs.get("attr2").unwrap().data_type, "Number");
+        assert_eq!(attrs.get("attr2").unwrap().string_value, Some("123".to_string()));
+    }
+
+    #[test]
+    fn test_parse_json_with_queue_attributes() {
+        use axum::http::HeaderMap;
+
+        let json_body = r#"{
+            "QueueName": "test-queue",
+            "Attributes": {
+                "VisibilityTimeout": "60",
+                "MessageRetentionPeriod": "86400"
+            }
+        }"#;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-amz-target", "AmazonSQS.CreateQueue".parse().unwrap());
+
+        let req = SqsRequest::parse_with_headers(json_body, &headers).unwrap();
+        let attrs = req.parse_queue_attributes();
+
+        assert_eq!(attrs.get("VisibilityTimeout"), Some(&"60".to_string()));
+        assert_eq!(attrs.get("MessageRetentionPeriod"), Some(&"86400".to_string()));
+    }
+
+    #[test]
+    fn test_parse_json_send_message_batch() {
+        use axum::http::HeaderMap;
+
+        let json_body = r#"{
+            "QueueUrl": "http://localhost:9324/queue/test",
+            "Entries": [
+                {
+                    "Id": "msg1",
+                    "MessageBody": "First message"
+                },
+                {
+                    "Id": "msg2",
+                    "MessageBody": "Second message",
+                    "DelaySeconds": 5
+                }
+            ]
+        }"#;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-amz-target", "AmazonSQS.SendMessageBatch".parse().unwrap());
+
+        let req = SqsRequest::parse_with_headers(json_body, &headers).unwrap();
+        let entries = req.parse_send_message_batch_entries();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].id, "msg1");
+        assert_eq!(entries[0].message_body, "First message");
+        assert_eq!(entries[0].delay_seconds, None);
+        assert_eq!(entries[1].id, "msg2");
+        assert_eq!(entries[1].message_body, "Second message");
+        assert_eq!(entries[1].delay_seconds, Some(5));
+    }
+
+    #[test]
+    fn test_parse_json_delete_message_batch() {
+        use axum::http::HeaderMap;
+
+        let json_body = r#"{
+            "QueueUrl": "http://localhost:9324/queue/test",
+            "Entries": [
+                {
+                    "Id": "msg1",
+                    "ReceiptHandle": "handle1"
+                },
+                {
+                    "Id": "msg2",
+                    "ReceiptHandle": "handle2"
+                }
+            ]
+        }"#;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-amz-target", "AmazonSQS.DeleteMessageBatch".parse().unwrap());
+
+        let req = SqsRequest::parse_with_headers(json_body, &headers).unwrap();
+        let entries = req.parse_delete_message_batch_entries();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].id, "msg1");
+        assert_eq!(entries[0].receipt_handle, "handle1");
+        assert_eq!(entries[1].id, "msg2");
+        assert_eq!(entries[1].receipt_handle, "handle2");
+    }
+
+    #[test]
+    fn test_parse_json_change_visibility_batch() {
+        use axum::http::HeaderMap;
+
+        let json_body = r#"{
+            "QueueUrl": "http://localhost:9324/queue/test",
+            "Entries": [
+                {
+                    "Id": "msg1",
+                    "ReceiptHandle": "handle1",
+                    "VisibilityTimeout": 30
+                },
+                {
+                    "Id": "msg2",
+                    "ReceiptHandle": "handle2",
+                    "VisibilityTimeout": 60
+                }
+            ]
+        }"#;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-amz-target", "AmazonSQS.ChangeMessageVisibilityBatch".parse().unwrap());
+
+        let req = SqsRequest::parse_with_headers(json_body, &headers).unwrap();
+        let entries = req.parse_change_visibility_batch_entries();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].id, "msg1");
+        assert_eq!(entries[0].receipt_handle, "handle1");
+        assert_eq!(entries[0].visibility_timeout, 30);
+        assert_eq!(entries[1].id, "msg2");
+        assert_eq!(entries[1].receipt_handle, "handle2");
+        assert_eq!(entries[1].visibility_timeout, 60);
+    }
+
+    #[test]
+    fn test_parse_json_get_queue_attributes_with_attribute_names() {
+        use axum::http::HeaderMap;
+
+        let json_body = r#"{
+            "QueueUrl": "http://localhost:9324/queue/test",
+            "AttributeNames": ["VisibilityTimeout", "MessageRetentionPeriod", "QueueArn"]
+        }"#;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-amz-target", "AmazonSQS.GetQueueAttributes".parse().unwrap());
+
+        let req = SqsRequest::parse_with_headers(json_body, &headers).unwrap();
+        let attr_names = req.parse_attribute_names();
+
+        assert_eq!(attr_names.len(), 3);
+        assert!(attr_names.contains(&"VisibilityTimeout".to_string()));
+        assert!(attr_names.contains(&"MessageRetentionPeriod".to_string()));
+        assert!(attr_names.contains(&"QueueArn".to_string()));
+    }
+
+    #[test]
+    fn test_parse_json_missing_x_amz_target() {
+        use axum::http::HeaderMap;
+
+        let json_body = r#"{"QueueName": "test-queue"}"#;
+        let headers = HeaderMap::new();
+
+        let result = SqsRequest::parse_with_headers(json_body, &headers);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_json_invalid_action() {
+        use axum::http::HeaderMap;
+
+        let json_body = r#"{"QueueName": "test-queue"}"#;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-amz-target", "AmazonSQS.InvalidAction".parse().unwrap());
+
+        let result = SqsRequest::parse_with_headers(json_body, &headers);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_json_malformed_json() {
+        use axum::http::HeaderMap;
+
+        let json_body = r#"{"QueueName": "test-queue"#; // Missing closing brace
+        let mut headers = HeaderMap::new();
+        headers.insert("x-amz-target", "AmazonSQS.CreateQueue".parse().unwrap());
+
+        let result = SqsRequest::parse_with_headers(json_body, &headers);
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // Form-Encoded Parsing Edge Cases
+    // ========================================================================
+
+    #[test]
+    fn test_parse_form_multiple_message_attributes() {
+        let body = "Action=SendMessage&MessageAttribute.1.Name=attr1&MessageAttribute.1.Value.DataType=String&MessageAttribute.1.Value.StringValue=value1&MessageAttribute.2.Name=attr2&MessageAttribute.2.Value.DataType=Number&MessageAttribute.2.Value.StringValue=42";
+        let req = SqsRequest::parse(body).unwrap();
+
+        let attrs = req.parse_message_attributes();
+        assert_eq!(attrs.len(), 2);
+        assert_eq!(attrs.get("attr1").unwrap().string_value, Some("value1".to_string()));
+        assert_eq!(attrs.get("attr2").unwrap().string_value, Some("42".to_string()));
+    }
+
+    #[test]
+    fn test_parse_form_queue_attributes() {
+        let body = "Action=CreateQueue&QueueName=test&Attribute.1.Name=VisibilityTimeout&Attribute.1.Value=60&Attribute.2.Name=DelaySeconds&Attribute.2.Value=10";
+        let req = SqsRequest::parse(body).unwrap();
+
+        let attrs = req.parse_queue_attributes();
+        assert_eq!(attrs.get("VisibilityTimeout"), Some(&"60".to_string()));
+        assert_eq!(attrs.get("DelaySeconds"), Some(&"10".to_string()));
+    }
+
+    #[test]
+    fn test_parse_form_attribute_names() {
+        let body = "Action=GetQueueAttributes&QueueUrl=http%3A%2F%2Flocalhost%3A9324%2Fqueue%2Ftest&AttributeName.1=VisibilityTimeout&AttributeName.2=MessageRetentionPeriod";
+        let req = SqsRequest::parse(body).unwrap();
+
+        let attr_names = req.parse_attribute_names();
+        assert_eq!(attr_names.len(), 2);
+        assert!(attr_names.contains(&"VisibilityTimeout".to_string()));
+        assert!(attr_names.contains(&"MessageRetentionPeriod".to_string()));
+    }
+
+    #[test]
+    fn test_parse_form_attribute_names_with_all() {
+        let body = "Action=GetQueueAttributes&QueueUrl=http%3A%2F%2Flocalhost%3A9324%2Fqueue%2Ftest&AttributeName.1=All";
+        let req = SqsRequest::parse(body).unwrap();
+
+        let attr_names = req.parse_attribute_names();
+        assert_eq!(attr_names.len(), 1);
+        assert_eq!(attr_names[0], "All");
+    }
+
+    #[test]
+    fn test_parse_send_message_batch_with_fifo_fields() {
+        let body = "Action=SendMessageBatch&SendMessageBatchRequestEntry.1.Id=msg1&SendMessageBatchRequestEntry.1.MessageBody=Hello&SendMessageBatchRequestEntry.1.MessageGroupId=group1&SendMessageBatchRequestEntry.1.MessageDeduplicationId=dedup1";
+        let req = SqsRequest::parse(body).unwrap();
+
+        let entries = req.parse_send_message_batch_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].message_group_id, Some("group1".to_string()));
+        assert_eq!(entries[0].message_deduplication_id, Some("dedup1".to_string()));
+    }
+
+    #[test]
+    fn test_extract_queue_name_edge_cases() {
+        // Valid cases
+        assert_eq!(
+            extract_queue_name_from_url("http://localhost:9324/queue/test-queue"),
+            Some("test-queue".to_string())
+        );
+        assert_eq!(
+            extract_queue_name_from_url("https://sqs.us-east-1.amazonaws.com/123456789012/my-queue"),
+            Some("my-queue".to_string())
+        );
+
+        // Invalid cases
+        assert_eq!(extract_queue_name_from_url("http://localhost:9324/queue/"), None);
+        assert_eq!(extract_queue_name_from_url("http://localhost:9324/"), None);
+        assert_eq!(extract_queue_name_from_url(""), None);
+    }
+
+    #[test]
+    fn test_get_required_param_missing() {
+        let body = "Action=CreateQueue";
+        let req = SqsRequest::parse(body).unwrap();
+
+        let result = req.get_required_param("QueueName");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("QueueName"));
+    }
+
+    #[test]
+    fn test_parse_missing_action() {
+        let body = "QueueName=test-queue";
+        let result = SqsRequest::parse(body);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_invalid_action() {
+        let body = "Action=InvalidAction&QueueName=test";
+        let result = SqsRequest::parse(body);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_url_encoding_special_chars() {
+        let body = "Action=SendMessage&MessageBody=Hello%20World%21%40%23%24%25";
+        let req = SqsRequest::parse(body).unwrap();
+
+        assert_eq!(req.get_param("MessageBody"), Some("Hello World!@#$%"));
+    }
+
+    #[test]
+    fn test_parse_empty_message_attributes() {
+        let body = "Action=SendMessage&MessageBody=Test";
+        let req = SqsRequest::parse(body).unwrap();
+
+        let attrs = req.parse_message_attributes();
+        assert_eq!(attrs.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_empty_batch_entries() {
+        let body = "Action=SendMessageBatch&QueueUrl=http://localhost:9324/queue/test";
+        let req = SqsRequest::parse(body).unwrap();
+
+        let entries = req.parse_send_message_batch_entries();
+        assert_eq!(entries.len(), 0);
+    }
 }

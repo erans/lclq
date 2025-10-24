@@ -948,9 +948,9 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 ## Testing
 
 ### Unit Tests
-- [x] Test coverage for all modules ✅ IN PROGRESS (39.76% → target 90%)
+- [x] Test coverage for all modules ✅ IN PROGRESS (52.87% → target 90%)
   - [x] Use cargo-tarpaulin to measure
-  - [ ] Target >90% coverage (current: 39.76%, 1772/4457 lines)
+  - [ ] Target >90% coverage (current: 52.87%, 2359/4462 lines, +10.60% improvement)
 - [x] Core module tests ✅ PARTIAL
   - [ ] Message router tests
   - [x] Visibility manager tests (3/21 lines)
@@ -973,7 +973,7 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Config methods tests (2 tests)
   - [x] Custom configuration tests (6 tests)
   - [ ] TOML parsing tests (deferred - from_file is stub)
-- [x] SQS handler tests ✅ COMPLETE (28 tests, 195 total unit tests passing)
+- [x] SQS handler tests ✅ COMPLETE (28 tests, 218 total unit tests passing)
   - [x] CreateQueue (standard & FIFO)
   - [x] GetQueueUrl
   - [x] DeleteQueue
@@ -991,6 +991,24 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] ChangeMessageVisibility (2 tests: success, missing_receipt_handle)
   - [x] ChangeMessageVisibilityBatch (2 tests: success, missing_queue_url)
   - [x] Fixed 3 implementation bugs (created proper response builders)
+- [x] SQS request parsing tests ✅ COMPLETE (28 tests, 84.9% coverage for src/sqs/request.rs)
+  - [x] JSON Protocol Tests (11 tests) - AWS JSON 1.0 protocol parsing
+    - [x] CreateQueue, SendMessage, GetQueueAttributes JSON parsing
+    - [x] MessageAttributes and Queue Attributes from JSON objects
+    - [x] Batch operations JSON parsing (SendMessageBatch, DeleteMessageBatch, ChangeVisibilityBatch)
+    - [x] Error handling (missing X-Amz-Target header, invalid action, malformed JSON)
+  - [x] Form-Encoded Tests (11 tests) - Query Protocol edge cases
+    - [x] Multiple message attributes with numbered parameters
+    - [x] Queue attributes parsing (Attribute.1.Name/Value format)
+    - [x] Attribute names including "All" keyword
+    - [x] FIFO-specific fields (MessageGroupId, MessageDeduplicationId)
+    - [x] URL encoding special characters
+    - [x] Empty collections handling
+  - [x] Utility Tests (6 tests) - Edge cases and error handling
+    - [x] Queue URL extraction edge cases
+    - [x] Required parameter validation
+    - [x] Invalid action handling
+    - [x] Missing action errors
 
 ### Integration Tests
 - [ ] SQS integration tests
