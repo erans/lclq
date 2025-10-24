@@ -330,8 +330,8 @@ impl Subscriber for SubscriberService {
             resource_name.resource_id()
         );
 
-        // Get subscription config to find topic
-        let config = self
+        // Verify subscription exists
+        let _ = self
             .backend
             .get_subscription(&sub_id)
             .await
@@ -340,7 +340,7 @@ impl Subscriber for SubscriberService {
         // Modify visibility for each ack_id (receipt handle)
         for ack_id in &req.ack_ids {
             self.backend
-                .change_visibility(&config.topic_id, ack_id, req.ack_deadline_seconds as u32)
+                .change_visibility(&sub_id, ack_id, req.ack_deadline_seconds as u32)
                 .await
                 .map_err(|e| {
                     Status::internal(format!("Failed to modify ack deadline: {}", e))
@@ -370,8 +370,8 @@ impl Subscriber for SubscriberService {
             resource_name.resource_id()
         );
 
-        // Get subscription config to find topic
-        let config = self
+        // Verify subscription exists
+        let _ = self
             .backend
             .get_subscription(&sub_id)
             .await
@@ -380,7 +380,7 @@ impl Subscriber for SubscriberService {
         // Delete each message using ack_id (receipt handle)
         for ack_id in &req.ack_ids {
             self.backend
-                .delete_message(&config.topic_id, ack_id)
+                .delete_message(&sub_id, ack_id)
                 .await
                 .map_err(|e| Status::internal(format!("Failed to acknowledge message: {}", e)))?;
         }
@@ -407,14 +407,14 @@ impl Subscriber for SubscriberService {
             resource_name.resource_id()
         );
 
-        // Get subscription config to find topic
+        // Get subscription config
         let config = self
             .backend
             .get_subscription(&sub_id)
             .await
             .map_err(|_| Status::not_found(format!("Subscription not found: {}", req.subscription)))?;
 
-        // Receive messages from topic
+        // Receive messages from subscription queue (not topic - messages are fanned out to subscriptions)
         let options = ReceiveOptions {
             max_messages: req.max_messages as u32,
             visibility_timeout: Some(config.ack_deadline_seconds),
@@ -425,7 +425,7 @@ impl Subscriber for SubscriberService {
 
         let messages = self
             .backend
-            .receive_messages(&config.topic_id, options)
+            .receive_messages(&sub_id, options)
             .await
             .map_err(|e| Status::internal(format!("Failed to pull messages: {}", e)))?;
 
@@ -706,6 +706,1126 @@ impl Subscriber for SubscriberService {
     ) -> std::result::Result<Response<SeekResponse>, Status> {
         // TODO: Implement seek support
         Err(Status::unimplemented("Seek not yet implemented"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pubsub::proto::publisher_server::Publisher;
+    use crate::pubsub::publisher::PublisherService;
+    use crate::storage::memory::InMemoryBackend;
+    use crate::types::Message;
+    use tonic::Request;
+
+    /// Create a test subscriber service with in-memory backend.
+    fn create_test_service() -> SubscriberService {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        SubscriberService::new(backend)
+    }
+
+    /// Create a test publisher service (for creating topics).
+    fn create_test_publisher(backend: Arc<dyn StorageBackend>) -> PublisherService {
+        PublisherService::new(backend)
+    }
+
+    /// Helper to create a test topic.
+    async fn create_test_topic(
+        publisher: &PublisherService,
+        project: &str,
+        topic: &str,
+    ) -> crate::pubsub::proto::Topic {
+        let topic_proto = crate::pubsub::proto::Topic {
+            name: format!("projects/{}/topics/{}", project, topic),
+            labels: Default::default(),
+            message_retention_duration: None,
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+        };
+
+        let request = Request::new(topic_proto.clone());
+        publisher.create_topic(request).await.unwrap();
+        topic_proto
+    }
+
+    // ========================================================================
+    // Helper Function Tests
+    // ========================================================================
+
+    #[test]
+    fn test_subscription_to_config_conversion() {
+        let subscription = Subscription {
+            name: "projects/test-project/subscriptions/test-sub".to_string(),
+            topic: "projects/test-project/topics/test-topic".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 30,
+            retain_acked_messages: false,
+            message_retention_duration: Some(prost_types::Duration {
+                seconds: 86400,
+                nanos: 0,
+            }),
+            labels: Default::default(),
+            enable_message_ordering: true,
+            expiration_policy: None,
+            filter: "attributes.key = 'value'".to_string(),
+            dead_letter_policy: Some(DeadLetterPolicy {
+                dead_letter_topic: "projects/test-project/topics/dlq".to_string(),
+                max_delivery_attempts: 5,
+            }),
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+
+        let config = SubscriberService::subscription_to_config(&subscription).unwrap();
+
+        assert_eq!(config.id, "test-project:test-sub");
+        assert_eq!(config.name, "projects/test-project/subscriptions/test-sub");
+        assert_eq!(config.topic_id, "test-project:test-topic");
+        assert_eq!(config.ack_deadline_seconds, 30);
+        assert_eq!(config.message_retention_duration, 86400);
+        assert_eq!(config.enable_message_ordering, true);
+        assert_eq!(config.filter, Some("attributes.key = 'value'".to_string()));
+        assert!(config.dead_letter_policy.is_some());
+        assert_eq!(config.dead_letter_policy.as_ref().unwrap().max_delivery_attempts, 5);
+    }
+
+    #[test]
+    fn test_subscription_to_config_without_optional_fields() {
+        let subscription = Subscription {
+            name: "projects/test/subscriptions/sub1".to_string(),
+            topic: "projects/test/topics/topic1".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 10,
+            retain_acked_messages: false,
+            message_retention_duration: None, // Use default
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(), // Empty filter
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+
+        let config = SubscriberService::subscription_to_config(&subscription).unwrap();
+
+        assert_eq!(config.message_retention_duration, 604800); // Default 7 days
+        assert!(config.filter.is_none());
+        assert!(config.dead_letter_policy.is_none());
+    }
+
+    #[test]
+    fn test_config_to_subscription_conversion() {
+        let config = SubscriptionConfig {
+            id: "test-project:test-sub".to_string(),
+            name: "projects/test-project/subscriptions/test-sub".to_string(),
+            topic_id: "test-project:test-topic".to_string(),
+            ack_deadline_seconds: 20,
+            message_retention_duration: 172800,
+            enable_message_ordering: true,
+            filter: Some("attributes.env = 'prod'".to_string()),
+            dead_letter_policy: Some(crate::types::DeadLetterPolicy {
+                dead_letter_topic: "projects/test-project/topics/dlq".to_string(),
+                max_delivery_attempts: 3,
+            }),
+        };
+
+        let subscription = SubscriberService::config_to_subscription(&config);
+
+        assert_eq!(subscription.name, "projects/test-project/subscriptions/test-sub");
+        assert_eq!(subscription.topic, "projects/test-project/topics/test-topic");
+        assert_eq!(subscription.ack_deadline_seconds, 20);
+        assert_eq!(subscription.message_retention_duration.unwrap().seconds, 172800);
+        assert_eq!(subscription.enable_message_ordering, true);
+        assert_eq!(subscription.filter, "attributes.env = 'prod'");
+        assert!(subscription.dead_letter_policy.is_some());
+    }
+
+    // ========================================================================
+    // CreateSubscription Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_create_subscription_success() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let publisher = create_test_publisher(backend.clone());
+        let service = SubscriberService::new(backend);
+
+        // Create topic first
+        create_test_topic(&publisher, "test-project", "my-topic").await;
+
+        // Create subscription
+        let subscription = Subscription {
+            name: "projects/test-project/subscriptions/my-sub".to_string(),
+            topic: "projects/test-project/topics/my-topic".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 30,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+
+        let request = Request::new(subscription.clone());
+        let response = service.create_subscription(request).await.unwrap();
+        let created_sub = response.into_inner();
+
+        assert_eq!(created_sub.name, "projects/test-project/subscriptions/my-sub");
+        assert_eq!(created_sub.topic, "projects/test-project/topics/my-topic");
+        assert_eq!(created_sub.ack_deadline_seconds, 30);
+    }
+
+    #[tokio::test]
+    async fn test_create_subscription_topic_not_found() {
+        let service = create_test_service();
+
+        let subscription = Subscription {
+            name: "projects/test-project/subscriptions/my-sub".to_string(),
+            topic: "projects/test-project/topics/nonexistent".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 10,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+
+        let request = Request::new(subscription);
+        let result = service.create_subscription(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_create_subscription_invalid_name() {
+        let service = create_test_service();
+
+        let subscription = Subscription {
+            name: "invalid-subscription-name".to_string(),
+            topic: "projects/test/topics/topic1".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 10,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+
+        let request = Request::new(subscription);
+        let result = service.create_subscription(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn test_create_subscription_invalid_id() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let publisher = create_test_publisher(backend.clone());
+        let service = SubscriberService::new(backend);
+
+        // Create topic first
+        create_test_topic(&publisher, "test-project", "topic1").await;
+
+        let subscription = Subscription {
+            name: "projects/test-project/subscriptions/123invalid".to_string(), // Starts with number
+            topic: "projects/test-project/topics/topic1".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 10,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+
+        let request = Request::new(subscription);
+        let result = service.create_subscription(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn test_create_subscription_with_message_ordering() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let publisher = create_test_publisher(backend.clone());
+        let service = SubscriberService::new(backend);
+
+        // Create topic
+        create_test_topic(&publisher, "test-project", "ordered-topic").await;
+
+        let subscription = Subscription {
+            name: "projects/test-project/subscriptions/ordered-sub".to_string(),
+            topic: "projects/test-project/topics/ordered-topic".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 10,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: true, // Enable ordering
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+
+        let request = Request::new(subscription);
+        let response = service.create_subscription(request).await.unwrap();
+        let created_sub = response.into_inner();
+
+        assert_eq!(created_sub.enable_message_ordering, true);
+    }
+
+    // ========================================================================
+    // GetSubscription Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_subscription_success() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let publisher = create_test_publisher(backend.clone());
+        let service = SubscriberService::new(backend);
+
+        // Create topic and subscription
+        create_test_topic(&publisher, "test-project", "topic1").await;
+
+        let subscription = Subscription {
+            name: "projects/test-project/subscriptions/get-sub".to_string(),
+            topic: "projects/test-project/topics/topic1".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 15,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+        service.create_subscription(Request::new(subscription)).await.unwrap();
+
+        // Get subscription
+        let get_request = GetSubscriptionRequest {
+            subscription: "projects/test-project/subscriptions/get-sub".to_string(),
+        };
+
+        let request = Request::new(get_request);
+        let response = service.get_subscription(request).await.unwrap();
+        let retrieved_sub = response.into_inner();
+
+        assert_eq!(retrieved_sub.name, "projects/test-project/subscriptions/get-sub");
+        assert_eq!(retrieved_sub.ack_deadline_seconds, 15);
+    }
+
+    #[tokio::test]
+    async fn test_get_subscription_not_found() {
+        let service = create_test_service();
+
+        let get_request = GetSubscriptionRequest {
+            subscription: "projects/test-project/subscriptions/nonexistent".to_string(),
+        };
+
+        let request = Request::new(get_request);
+        let result = service.get_subscription(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_get_subscription_invalid_name() {
+        let service = create_test_service();
+
+        let get_request = GetSubscriptionRequest {
+            subscription: "invalid-format".to_string(),
+        };
+
+        let request = Request::new(get_request);
+        let result = service.get_subscription(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    // ========================================================================
+    // UpdateSubscription Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_update_subscription_unimplemented() {
+        let service = create_test_service();
+
+        let update_request = UpdateSubscriptionRequest {
+            subscription: None,
+            update_mask: None,
+        };
+
+        let request = Request::new(update_request);
+        let result = service.update_subscription(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unimplemented);
+    }
+
+    // ========================================================================
+    // ListSubscriptions Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_list_subscriptions_empty() {
+        let service = create_test_service();
+
+        let list_request = ListSubscriptionsRequest {
+            project: "projects/test-project".to_string(),
+            page_size: 0,
+            page_token: String::new(),
+        };
+
+        let request = Request::new(list_request);
+        let response = service.list_subscriptions(request).await.unwrap();
+        let list_response = response.into_inner();
+
+        assert_eq!(list_response.subscriptions.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_list_subscriptions_with_data() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let publisher = create_test_publisher(backend.clone());
+        let service = SubscriberService::new(backend);
+
+        // Create topic
+        create_test_topic(&publisher, "test-project", "list-topic").await;
+
+        // Create two subscriptions
+        for i in 1..=2 {
+            let subscription = Subscription {
+                name: format!("projects/test-project/subscriptions/sub{}", i),
+                topic: "projects/test-project/topics/list-topic".to_string(),
+                push_config: None,
+                ack_deadline_seconds: 10,
+                retain_acked_messages: false,
+                message_retention_duration: None,
+                labels: Default::default(),
+                enable_message_ordering: false,
+                expiration_policy: None,
+                filter: String::new(),
+                dead_letter_policy: None,
+                retry_policy: None,
+                detached: false,
+                enable_exactly_once_delivery: false,
+                topic_message_retention_duration: None,
+                state: State::Active as i32,
+            };
+            service.create_subscription(Request::new(subscription)).await.unwrap();
+        }
+
+        // List subscriptions
+        let list_request = ListSubscriptionsRequest {
+            project: "projects/test-project".to_string(),
+            page_size: 0,
+            page_token: String::new(),
+        };
+
+        let request = Request::new(list_request);
+        let response = service.list_subscriptions(request).await.unwrap();
+        let list_response = response.into_inner();
+
+        assert_eq!(list_response.subscriptions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_list_subscriptions_filters_by_project() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let publisher = create_test_publisher(backend.clone());
+        let service = SubscriberService::new(backend);
+
+        // Create topics in different projects
+        create_test_topic(&publisher, "project-a", "topic-a").await;
+        create_test_topic(&publisher, "project-b", "topic-b").await;
+
+        // Create subscriptions in different projects
+        let sub_a = Subscription {
+            name: "projects/project-a/subscriptions/sub-a".to_string(),
+            topic: "projects/project-a/topics/topic-a".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 10,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+        service.create_subscription(Request::new(sub_a)).await.unwrap();
+
+        let sub_b = Subscription {
+            name: "projects/project-b/subscriptions/sub-b".to_string(),
+            topic: "projects/project-b/topics/topic-b".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 10,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+        service.create_subscription(Request::new(sub_b)).await.unwrap();
+
+        // List subscriptions for project-a only
+        let list_request = ListSubscriptionsRequest {
+            project: "projects/project-a".to_string(),
+            page_size: 0,
+            page_token: String::new(),
+        };
+
+        let request = Request::new(list_request);
+        let response = service.list_subscriptions(request).await.unwrap();
+        let list_response = response.into_inner();
+
+        assert_eq!(list_response.subscriptions.len(), 1);
+        assert!(list_response.subscriptions[0].name.contains("project-a"));
+    }
+
+    // ========================================================================
+    // DeleteSubscription Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_delete_subscription_success() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let publisher = create_test_publisher(backend.clone());
+        let service = SubscriberService::new(backend);
+
+        // Create topic and subscription
+        create_test_topic(&publisher, "test-project", "del-topic").await;
+
+        let subscription = Subscription {
+            name: "projects/test-project/subscriptions/del-sub".to_string(),
+            topic: "projects/test-project/topics/del-topic".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 10,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+        service.create_subscription(Request::new(subscription)).await.unwrap();
+
+        // Delete subscription
+        let delete_request = DeleteSubscriptionRequest {
+            subscription: "projects/test-project/subscriptions/del-sub".to_string(),
+        };
+
+        let request = Request::new(delete_request);
+        let response = service.delete_subscription(request).await;
+
+        assert!(response.is_ok());
+
+        // Verify subscription is deleted
+        let get_request = GetSubscriptionRequest {
+            subscription: "projects/test-project/subscriptions/del-sub".to_string(),
+        };
+        let result = service.get_subscription(Request::new(get_request)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_delete_subscription_not_found() {
+        let service = create_test_service();
+
+        let delete_request = DeleteSubscriptionRequest {
+            subscription: "projects/test-project/subscriptions/nonexistent".to_string(),
+        };
+
+        let request = Request::new(delete_request);
+        let result = service.delete_subscription(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_delete_subscription_invalid_name() {
+        let service = create_test_service();
+
+        let delete_request = DeleteSubscriptionRequest {
+            subscription: "invalid-format".to_string(),
+        };
+
+        let request = Request::new(delete_request);
+        let result = service.delete_subscription(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    // ========================================================================
+    // Pull Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_pull_empty_queue() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let publisher = create_test_publisher(backend.clone());
+        let service = SubscriberService::new(backend);
+
+        // Create topic and subscription
+        create_test_topic(&publisher, "test-project", "pull-topic").await;
+
+        let subscription = Subscription {
+            name: "projects/test-project/subscriptions/pull-sub".to_string(),
+            topic: "projects/test-project/topics/pull-topic".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 10,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+        service.create_subscription(Request::new(subscription)).await.unwrap();
+
+        // Pull messages (should be empty)
+        let pull_request = PullRequest {
+            subscription: "projects/test-project/subscriptions/pull-sub".to_string(),
+            return_immediately: true,
+            max_messages: 10,
+        };
+
+        let request = Request::new(pull_request);
+        let response = service.pull(request).await.unwrap();
+        let pull_response = response.into_inner();
+
+        assert_eq!(pull_response.received_messages.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_pull_with_messages() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let publisher = create_test_publisher(backend.clone());
+        let service = SubscriberService::new(backend.clone());
+
+        // Create topic and subscription
+        create_test_topic(&publisher, "test-project", "pull-topic2").await;
+
+        let subscription = Subscription {
+            name: "projects/test-project/subscriptions/pull-sub2".to_string(),
+            topic: "projects/test-project/topics/pull-topic2".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 10,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+        service.create_subscription(Request::new(subscription)).await.unwrap();
+
+        // Publish a message to topic using Publisher service (which fans out to subscriptions)
+        let publish_request = PublishRequest {
+            topic: "projects/test-project/topics/pull-topic2".to_string(),
+            messages: vec![
+                PubsubMessage {
+                    data: b"Test message".to_vec(),
+                    attributes: Default::default(),
+                    message_id: String::new(),
+                    publish_time: None,
+                    ordering_key: String::new(),
+                },
+            ],
+        };
+        publisher.publish(Request::new(publish_request)).await.unwrap();
+
+        // Pull messages
+        let pull_request = PullRequest {
+            subscription: "projects/test-project/subscriptions/pull-sub2".to_string(),
+            return_immediately: true,
+            max_messages: 10,
+        };
+
+        let request = Request::new(pull_request);
+        let response = service.pull(request).await.unwrap();
+        let pull_response = response.into_inner();
+
+        assert_eq!(pull_response.received_messages.len(), 1);
+        let received = &pull_response.received_messages[0];
+        assert!(!received.ack_id.is_empty());
+        assert!(received.message.is_some());
+
+        let msg = received.message.as_ref().unwrap();
+        assert_eq!(msg.data, b"Test message");
+    }
+
+    #[tokio::test]
+    async fn test_pull_subscription_not_found() {
+        let service = create_test_service();
+
+        let pull_request = PullRequest {
+            subscription: "projects/test-project/subscriptions/nonexistent".to_string(),
+            return_immediately: true,
+            max_messages: 10,
+        };
+
+        let request = Request::new(pull_request);
+        let result = service.pull(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_pull_respects_max_messages() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let publisher = create_test_publisher(backend.clone());
+        let service = SubscriberService::new(backend.clone());
+
+        // Create topic and subscription
+        create_test_topic(&publisher, "test-project", "max-msg-topic").await;
+
+        let subscription = Subscription {
+            name: "projects/test-project/subscriptions/max-msg-sub".to_string(),
+            topic: "projects/test-project/topics/max-msg-topic".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 10,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+        service.create_subscription(Request::new(subscription)).await.unwrap();
+
+        // Publish 5 messages to topic using Publisher service (which fans out to subscriptions)
+        let mut messages = Vec::new();
+        for i in 0..5 {
+            messages.push(PubsubMessage {
+                data: format!("Message {}", i).as_bytes().to_vec(),
+                attributes: Default::default(),
+                message_id: String::new(),
+                publish_time: None,
+                ordering_key: String::new(),
+            });
+        }
+
+        let publish_request = PublishRequest {
+            topic: "projects/test-project/topics/max-msg-topic".to_string(),
+            messages,
+        };
+        publisher.publish(Request::new(publish_request)).await.unwrap();
+
+        // Pull with max_messages=2
+        let pull_request = PullRequest {
+            subscription: "projects/test-project/subscriptions/max-msg-sub".to_string(),
+            return_immediately: true,
+            max_messages: 2,
+        };
+
+        let request = Request::new(pull_request);
+        let response = service.pull(request).await.unwrap();
+        let pull_response = response.into_inner();
+
+        assert_eq!(pull_response.received_messages.len(), 2); // Should respect max_messages
+    }
+
+    // ========================================================================
+    // Acknowledge Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_acknowledge_success() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let publisher = create_test_publisher(backend.clone());
+        let service = SubscriberService::new(backend.clone());
+
+        // Create topic and subscription
+        create_test_topic(&publisher, "test-project", "ack-topic").await;
+
+        let subscription = Subscription {
+            name: "projects/test-project/subscriptions/ack-sub".to_string(),
+            topic: "projects/test-project/topics/ack-topic".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 10,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+        service.create_subscription(Request::new(subscription)).await.unwrap();
+
+        // Publish a message to topic using Publisher service (which fans out to subscriptions)
+        let publish_request = PublishRequest {
+            topic: "projects/test-project/topics/ack-topic".to_string(),
+            messages: vec![
+                PubsubMessage {
+                    data: b"Ack test".to_vec(),
+                    attributes: Default::default(),
+                    message_id: String::new(),
+                    publish_time: None,
+                    ordering_key: String::new(),
+                },
+            ],
+        };
+        publisher.publish(Request::new(publish_request)).await.unwrap();
+
+        // Pull message
+        let pull_request = PullRequest {
+            subscription: "projects/test-project/subscriptions/ack-sub".to_string(),
+            return_immediately: true,
+            max_messages: 1,
+        };
+        let response = service.pull(Request::new(pull_request)).await.unwrap();
+        let ack_id = response.into_inner().received_messages[0].ack_id.clone();
+
+        // Acknowledge the message
+        let ack_request = AcknowledgeRequest {
+            subscription: "projects/test-project/subscriptions/ack-sub".to_string(),
+            ack_ids: vec![ack_id],
+        };
+
+        let request = Request::new(ack_request);
+        let response = service.acknowledge(request).await;
+
+        assert!(response.is_ok());
+
+        // Pull again - should be empty now
+        let pull_request2 = PullRequest {
+            subscription: "projects/test-project/subscriptions/ack-sub".to_string(),
+            return_immediately: true,
+            max_messages: 1,
+        };
+        let response2 = service.pull(Request::new(pull_request2)).await.unwrap();
+        assert_eq!(response2.into_inner().received_messages.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_acknowledge_subscription_not_found() {
+        let service = create_test_service();
+
+        let ack_request = AcknowledgeRequest {
+            subscription: "projects/test-project/subscriptions/nonexistent".to_string(),
+            ack_ids: vec!["some-ack-id".to_string()],
+        };
+
+        let request = Request::new(ack_request);
+        let result = service.acknowledge(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+    }
+
+    // ========================================================================
+    // ModifyAckDeadline Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_modify_ack_deadline_success() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let publisher = create_test_publisher(backend.clone());
+        let service = SubscriberService::new(backend.clone());
+
+        // Create topic and subscription
+        create_test_topic(&publisher, "test-project", "modify-topic").await;
+
+        let subscription = Subscription {
+            name: "projects/test-project/subscriptions/modify-sub".to_string(),
+            topic: "projects/test-project/topics/modify-topic".to_string(),
+            push_config: None,
+            ack_deadline_seconds: 10,
+            retain_acked_messages: false,
+            message_retention_duration: None,
+            labels: Default::default(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: None,
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: State::Active as i32,
+        };
+        service.create_subscription(Request::new(subscription)).await.unwrap();
+
+        // Publish a message to topic using Publisher service (which fans out to subscriptions)
+        let publish_request = PublishRequest {
+            topic: "projects/test-project/topics/modify-topic".to_string(),
+            messages: vec![
+                PubsubMessage {
+                    data: b"Modify test".to_vec(),
+                    attributes: Default::default(),
+                    message_id: String::new(),
+                    publish_time: None,
+                    ordering_key: String::new(),
+                },
+            ],
+        };
+        publisher.publish(Request::new(publish_request)).await.unwrap();
+
+        // Pull message
+        let pull_request = PullRequest {
+            subscription: "projects/test-project/subscriptions/modify-sub".to_string(),
+            return_immediately: true,
+            max_messages: 1,
+        };
+        let response = service.pull(Request::new(pull_request)).await.unwrap();
+        let ack_id = response.into_inner().received_messages[0].ack_id.clone();
+
+        // Modify ack deadline
+        let modify_request = ModifyAckDeadlineRequest {
+            subscription: "projects/test-project/subscriptions/modify-sub".to_string(),
+            ack_ids: vec![ack_id],
+            ack_deadline_seconds: 60,
+        };
+
+        let request = Request::new(modify_request);
+        let response = service.modify_ack_deadline(request).await;
+
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_modify_ack_deadline_subscription_not_found() {
+        let service = create_test_service();
+
+        let modify_request = ModifyAckDeadlineRequest {
+            subscription: "projects/test-project/subscriptions/nonexistent".to_string(),
+            ack_ids: vec!["some-ack-id".to_string()],
+            ack_deadline_seconds: 60,
+        };
+
+        let request = Request::new(modify_request);
+        let result = service.modify_ack_deadline(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+    }
+
+    // ========================================================================
+    // Unimplemented Method Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_modify_push_config_unimplemented() {
+        let service = create_test_service();
+
+        let request = ModifyPushConfigRequest {
+            subscription: "projects/test/subscriptions/sub1".to_string(),
+            push_config: None,
+        };
+
+        let result = service.modify_push_config(Request::new(request)).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unimplemented);
+    }
+
+    #[tokio::test]
+    async fn test_get_snapshot_unimplemented() {
+        let service = create_test_service();
+
+        let request = GetSnapshotRequest {
+            snapshot: "projects/test/snapshots/snap1".to_string(),
+        };
+
+        let result = service.get_snapshot(Request::new(request)).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unimplemented);
+    }
+
+    #[tokio::test]
+    async fn test_list_snapshots_unimplemented() {
+        let service = create_test_service();
+
+        let request = ListSnapshotsRequest {
+            project: "projects/test".to_string(),
+            page_size: 0,
+            page_token: String::new(),
+        };
+
+        let result = service.list_snapshots(Request::new(request)).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unimplemented);
+    }
+
+    #[tokio::test]
+    async fn test_create_snapshot_unimplemented() {
+        let service = create_test_service();
+
+        let request = CreateSnapshotRequest {
+            name: "projects/test/snapshots/snap1".to_string(),
+            subscription: "projects/test/subscriptions/sub1".to_string(),
+            labels: Default::default(),
+        };
+
+        let result = service.create_snapshot(Request::new(request)).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unimplemented);
+    }
+
+    #[tokio::test]
+    async fn test_update_snapshot_unimplemented() {
+        let service = create_test_service();
+
+        let request = UpdateSnapshotRequest {
+            snapshot: None,
+            update_mask: None,
+        };
+
+        let result = service.update_snapshot(Request::new(request)).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unimplemented);
+    }
+
+    #[tokio::test]
+    async fn test_delete_snapshot_unimplemented() {
+        let service = create_test_service();
+
+        let request = DeleteSnapshotRequest {
+            snapshot: "projects/test/snapshots/snap1".to_string(),
+        };
+
+        let result = service.delete_snapshot(Request::new(request)).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unimplemented);
+    }
+
+    #[tokio::test]
+    async fn test_seek_unimplemented() {
+        let service = create_test_service();
+
+        let request = SeekRequest {
+            subscription: "projects/test/subscriptions/sub1".to_string(),
+            target: None,
+        };
+
+        let result = service.seek(Request::new(request)).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unimplemented);
     }
 }
 
