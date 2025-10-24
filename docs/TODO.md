@@ -911,7 +911,23 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Test all endpoints (SQS, Admin API, Metrics)
   - [x] Verify persistence with volumes (SQLite backend)
 
-### 7.5 Release Preparation
+### 7.5 Code Quality & Cleanup ✅ COMPLETE
+- [x] **Fix all compiler warnings**
+  - [x] Remove unused imports (subscriber.rs)
+  - [x] Mark unused variables with underscore (admin.rs)
+  - [x] Add #[cfg(test)] for test-only functions (admin.rs)
+  - [x] Add #[allow(deprecated)] for deprecated field usage (subscriber.rs)
+  - [x] Fix boolean assertions per clippy recommendations (config.rs, subscriber.rs)
+- [x] **Achieve zero-warning compilation**
+  - [x] cargo build: 0 warnings ✓
+  - [x] cargo test: 160 tests passing, 0 warnings ✓
+  - [x] cargo clippy: 0 warnings ✓
+- [x] **Code quality improvements**
+  - [x] Better assertion patterns (assert! vs assert_eq! for booleans)
+  - [x] Proper handling of test-only code
+  - [x] Consistent code style across all modules
+
+### 7.6 Release Preparation
 - [ ] Version tagging and releases
   - [ ] Semantic versioning
   - [ ] Git tags for releases
@@ -949,10 +965,14 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Topic name validation
   - [x] Message size validation
   - [x] Attribute validation
-- [ ] Configuration tests
-  - [ ] TOML parsing tests
-  - [ ] Default configuration tests
-  - [ ] Validation tests
+- [x] Configuration tests ✅ COMPLETE (17 tests, 309/473 lines - 65%)
+  - [x] Default configuration tests (1 test)
+  - [x] Serialization/deserialization tests (3 tests)
+  - [x] Eviction policy tests (3 tests)
+  - [x] Log format tests (2 tests)
+  - [x] Config methods tests (2 tests)
+  - [x] Custom configuration tests (6 tests)
+  - [ ] TOML parsing tests (deferred - from_file is stub)
 - [x] SQS handler tests ✅ COMPLETE (16 tests, 250/810 lines - 31%)
   - [x] CreateQueue (standard & FIFO)
   - [x] GetQueueUrl

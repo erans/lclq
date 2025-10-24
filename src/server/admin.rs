@@ -24,14 +24,14 @@ struct AdminState {
 }
 
 /// Health check response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct HealthResponse {
     status: String,
     backend_status: String,
 }
 
 /// Overall statistics response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct StatsResponse {
     total_queues: usize,
     total_messages: u64,
@@ -39,13 +39,13 @@ struct StatsResponse {
 }
 
 /// Queue list response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct QueueListResponse {
     queues: Vec<QueueSummary>,
 }
 
 /// Queue summary for list endpoint
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct QueueSummary {
     id: String,
     name: String,
@@ -55,7 +55,7 @@ struct QueueSummary {
 }
 
 /// Queue details response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct QueueDetailsResponse {
     id: String,
     name: String,
@@ -83,7 +83,7 @@ struct CreateQueueRequest {
 }
 
 /// Error response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ErrorResponse {
     error: String,
 }
@@ -324,4 +324,494 @@ pub async fn start_admin_server(
 
     info!("Admin API server shut down gracefully");
     Ok(())
+}
+
+/// Helper function to create a router for testing without starting the server
+#[cfg(test)]
+fn create_router(backend: Arc<dyn StorageBackend>) -> Router {
+    let state = AdminState { backend };
+    Router::new()
+        .route("/health", get(health_check))
+        .route("/stats", get(get_stats))
+        .route("/queues", get(list_queues))
+        .route("/queues", post(create_queue))
+        .route("/queues/{name}", get(get_queue))
+        .route("/queues/{name}", delete(delete_queue))
+        .route("/queues/{name}/purge", post(purge_queue))
+        .layer(CorsLayer::permissive())
+        .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::memory::InMemoryBackend;
+    use crate::storage::StorageBackend;
+    use crate::types::{QueueConfig, QueueType};
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use serde_json::json;
+    use tower::ServiceExt;
+
+    /// Create a test admin router with in-memory backend.
+    fn create_test_router() -> Router {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        create_router(backend)
+    }
+
+    /// Helper to extract JSON body from response.
+    async fn extract_json<T: serde::de::DeserializeOwned>(response: axum::response::Response) -> T {
+        let (_parts, body) = response.into_parts();
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    // ========================================================================
+    // Health Check Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_health_check_success() {
+        let app = create_test_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let health: HealthResponse = extract_json(response).await;
+        assert_eq!(health.status, "healthy");
+    }
+
+    // ========================================================================
+    // Stats Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_stats_empty() {
+        let app = create_test_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/stats")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let stats: StatsResponse = extract_json(response).await;
+        assert_eq!(stats.total_queues, 0);
+        assert_eq!(stats.total_messages, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_stats_with_data() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let app = create_router(backend.clone());
+
+        // Create some queues
+        let queue1 = QueueConfig {
+            id: "queue1".to_string(),
+            name: "queue1".to_string(),
+            queue_type: QueueType::SqsStandard,
+            visibility_timeout: 30,
+            message_retention_period: 345600,
+            max_message_size: 262144,
+            delay_seconds: 0,
+            dlq_config: None,
+            content_based_deduplication: false,
+            tags: std::collections::HashMap::new(),
+            redrive_allow_policy: None,
+        };
+        backend.create_queue(queue1).await.unwrap();
+
+        let queue2 = QueueConfig {
+            id: "queue2".to_string(),
+            name: "queue2".to_string(),
+            queue_type: QueueType::SqsFifo,
+            visibility_timeout: 30,
+            message_retention_period: 345600,
+            max_message_size: 262144,
+            delay_seconds: 0,
+            dlq_config: None,
+            content_based_deduplication: false,
+            tags: std::collections::HashMap::new(),
+            redrive_allow_policy: None,
+        };
+        backend.create_queue(queue2).await.unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/stats")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let stats: StatsResponse = extract_json(response).await;
+        assert_eq!(stats.total_queues, 2);
+    }
+
+    // ========================================================================
+    // List Queues Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_list_queues_empty() {
+        let app = create_test_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/queues")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let list: QueueListResponse = extract_json(response).await;
+        assert_eq!(list.queues.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_list_queues_with_data() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let app = create_router(backend.clone());
+
+        // Create two queues
+        for i in 1..=2 {
+            let queue = QueueConfig {
+                id: format!("queue{}", i),
+                name: format!("queue{}", i),
+                queue_type: QueueType::SqsStandard,
+                visibility_timeout: 30,
+                message_retention_period: 345600,
+                max_message_size: 262144,
+                delay_seconds: 0,
+                dlq_config: None,
+                content_based_deduplication: false,
+                tags: std::collections::HashMap::new(),
+                redrive_allow_policy: None,
+            };
+            backend.create_queue(queue).await.unwrap();
+        }
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/queues")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let list: QueueListResponse = extract_json(response).await;
+        assert_eq!(list.queues.len(), 2);
+    }
+
+    // Note: Prefix filtering via query parameters is not currently implemented in the list_queues endpoint.
+    // The endpoint passes None to backend.list_queues(), which returns all queues.
+
+    // ========================================================================
+    // Get Queue Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_queue_success() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let app = create_router(backend.clone());
+
+        // Create queue
+        let queue = QueueConfig {
+            id: "my-queue".to_string(),
+            name: "my-queue".to_string(),
+            queue_type: QueueType::SqsStandard,
+            visibility_timeout: 30,
+            message_retention_period: 345600,
+            max_message_size: 262144,
+            delay_seconds: 0,
+            dlq_config: None,
+            content_based_deduplication: false,
+            tags: std::collections::HashMap::new(),
+            redrive_allow_policy: None,
+        };
+        backend.create_queue(queue).await.unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/queues/my-queue")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let detail: QueueDetailsResponse = extract_json(response).await;
+        assert_eq!(detail.name, "my-queue");
+        assert_eq!(detail.available_messages, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_queue_not_found() {
+        let app = create_test_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/queues/nonexistent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let error: ErrorResponse = extract_json(response).await;
+        assert!(error.error.contains("not found") || error.error.contains("Not found"));
+    }
+
+    // ========================================================================
+    // Create Queue Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_create_queue_standard() {
+        let app = create_test_router();
+
+        let create_request = json!({
+            "name": "new-queue",
+            "visibility_timeout": 30,
+            "message_retention_period": 345600,
+            "max_message_size": 262144
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/queues")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&create_request).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let created: QueueDetailsResponse = extract_json(response).await;
+        assert_eq!(created.name, "new-queue");
+        assert_eq!(created.queue_type, "SqsStandard");
+    }
+
+    #[tokio::test]
+    async fn test_create_queue_fifo() {
+        let app = create_test_router();
+
+        let create_request = json!({
+            "name": "fifo-queue.fifo",
+            "queue_type": "fifo",
+            "visibility_timeout": 30,
+            "message_retention_period": 345600,
+            "max_message_size": 262144,
+            "content_based_deduplication": true
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/queues")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&create_request).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let created: QueueDetailsResponse = extract_json(response).await;
+        assert_eq!(created.name, "fifo-queue.fifo");
+        assert_eq!(created.queue_type, "SqsFifo");
+    }
+
+    #[tokio::test]
+    async fn test_create_queue_pubsub() {
+        let app = create_test_router();
+
+        let create_request = json!({
+            "name": "pubsub-topic",
+            "queue_type": "pubsub",
+            "visibility_timeout": 60,
+            "message_retention_period": 604800,
+            "max_message_size": 10485760
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/queues")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&create_request).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let created: QueueDetailsResponse = extract_json(response).await;
+        assert_eq!(created.name, "pubsub-topic");
+        assert_eq!(created.queue_type, "PubSubTopic");
+    }
+
+    // Note: The current implementation generates a new UUID for each queue,
+    // so duplicate queue names are not prevented. Duplicate detection is based on queue ID only.
+
+    // ========================================================================
+    // Delete Queue Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_delete_queue_success() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let app = create_router(backend.clone());
+
+        // Create queue first
+        let queue = QueueConfig {
+            id: "delete-me".to_string(),
+            name: "delete-me".to_string(),
+            queue_type: QueueType::SqsStandard,
+            visibility_timeout: 30,
+            message_retention_period: 345600,
+            max_message_size: 262144,
+            delay_seconds: 0,
+            dlq_config: None,
+            content_based_deduplication: false,
+            tags: std::collections::HashMap::new(),
+            redrive_allow_policy: None,
+        };
+        backend.create_queue(queue).await.unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/queues/delete-me")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn test_delete_queue_not_found() {
+        let app = create_test_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/queues/nonexistent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let error: ErrorResponse = extract_json(response).await;
+        assert!(error.error.contains("not found") || error.error.contains("Not found"));
+    }
+
+    // ========================================================================
+    // Purge Queue Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_purge_queue_success() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let app = create_router(backend.clone());
+
+        // Create queue
+        let queue = QueueConfig {
+            id: "purge-me".to_string(),
+            name: "purge-me".to_string(),
+            queue_type: QueueType::SqsStandard,
+            visibility_timeout: 30,
+            message_retention_period: 345600,
+            max_message_size: 262144,
+            delay_seconds: 0,
+            dlq_config: None,
+            content_based_deduplication: false,
+            tags: std::collections::HashMap::new(),
+            redrive_allow_policy: None,
+        };
+        backend.create_queue(queue).await.unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/queues/purge-me/purge")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn test_purge_queue_not_found() {
+        let app = create_test_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/queues/nonexistent/purge")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let error: ErrorResponse = extract_json(response).await;
+        assert!(error.error.contains("not found") || error.error.contains("Not found"));
+    }
 }

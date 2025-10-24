@@ -710,12 +710,12 @@ impl Subscriber for SubscriberService {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // PullRequest::return_immediately is deprecated but still used in tests
 mod tests {
     use super::*;
     use crate::pubsub::proto::publisher_server::Publisher;
     use crate::pubsub::publisher::PublisherService;
     use crate::storage::memory::InMemoryBackend;
-    use crate::types::Message;
     use tonic::Request;
 
     /// Create a test subscriber service with in-memory backend.
@@ -788,7 +788,7 @@ mod tests {
         assert_eq!(config.topic_id, "test-project:test-topic");
         assert_eq!(config.ack_deadline_seconds, 30);
         assert_eq!(config.message_retention_duration, 86400);
-        assert_eq!(config.enable_message_ordering, true);
+        assert!(config.enable_message_ordering);
         assert_eq!(config.filter, Some("attributes.key = 'value'".to_string()));
         assert!(config.dead_letter_policy.is_some());
         assert_eq!(config.dead_letter_policy.as_ref().unwrap().max_delivery_attempts, 5);
@@ -844,7 +844,7 @@ mod tests {
         assert_eq!(subscription.topic, "projects/test-project/topics/test-topic");
         assert_eq!(subscription.ack_deadline_seconds, 20);
         assert_eq!(subscription.message_retention_duration.unwrap().seconds, 172800);
-        assert_eq!(subscription.enable_message_ordering, true);
+        assert!(subscription.enable_message_ordering);
         assert_eq!(subscription.filter, "attributes.env = 'prod'");
         assert!(subscription.dead_letter_policy.is_some());
     }
@@ -1021,7 +1021,7 @@ mod tests {
         let response = service.create_subscription(request).await.unwrap();
         let created_sub = response.into_inner();
 
-        assert_eq!(created_sub.enable_message_ordering, true);
+        assert!(created_sub.enable_message_ordering);
     }
 
     // ========================================================================
