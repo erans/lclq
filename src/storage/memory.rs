@@ -213,6 +213,89 @@ impl InMemoryBackend {
         hasher.update(message.body.as_bytes());
         format!("{:x}", hasher.finalize())
     }
+
+    /// Internal helper that assumes the lock is already held.
+    /// This is used by send_messages to avoid lock contention when sending batches.
+    async fn send_message_locked(
+        &self,
+        queue: &mut QueueData,
+        queue_id: &str,
+        mut message: Message,
+    ) -> Result<Message> {
+        // NOTE: maybe_evict is called by send_messages before acquiring the lock
+
+        queue.last_access = Utc::now();
+
+        // Handle FIFO deduplication and ordering for SQS FIFO queues
+        if queue.config.queue_type == QueueType::SqsFifo {
+            let dedup_id = if let Some(ref id) = message.deduplication_id {
+                id.clone()
+            } else if queue.config.content_based_deduplication {
+                Self::generate_content_dedup_id(&message)
+            } else {
+                return Err(Error::Validation(
+                    crate::error::ValidationError::InvalidParameter {
+                        name: "MessageDeduplicationId".to_string(),
+                        reason: "Required for FIFO queues without content-based deduplication"
+                            .to_string(),
+                    },
+                ));
+            };
+
+            // Check deduplication cache
+            if let Some(&cached_time) = queue.deduplication_cache.get(&dedup_id) {
+                let age = Utc::now() - cached_time;
+                if age < Duration::minutes(5) {
+                    debug!(
+                        queue_id = %queue_id,
+                        dedup_id = %dedup_id,
+                        "Message deduplicated (already sent within 5 minutes)"
+                    );
+                    return Ok(message); // Return the message but don't add it
+                }
+            }
+
+            // Add to deduplication cache
+            queue.deduplication_cache.insert(dedup_id, Utc::now());
+
+            // Assign sequence number
+            message.sequence_number = Some(queue.next_sequence_number);
+            queue.next_sequence_number += 1;
+        }
+
+        // Handle ordering for Pub/Sub topics with ordering keys
+        if queue.config.queue_type == QueueType::PubSubTopic && message.message_group_id.is_some() {
+            // Assign sequence number for ordering
+            message.sequence_number = Some(queue.next_sequence_number);
+            debug!(
+                "Assigned seq={} to msg={} ordering_key={:?} queue={}",
+                queue.next_sequence_number,
+                message.id.0,
+                message.message_group_id,
+                queue_id
+            );
+            queue.next_sequence_number += 1;
+        }
+
+        // Calculate when message becomes visible
+        let delay = message.delay_seconds.unwrap_or(queue.config.delay_seconds);
+        let visible_at = Utc::now() + Duration::seconds(delay as i64);
+
+        let stored = StoredMessage {
+            message: message.clone(),
+            visible_at,
+        };
+
+        queue.available_messages.push_back(stored);
+
+        debug!(
+            queue_id = %queue_id,
+            message_id = %message.id.0,
+            "Message sent to queue"
+        );
+
+        Ok(message)
+    }
 }
 
 impl Default for InMemoryBackend {
@@ -311,7 +394,7 @@ impl StorageBackend for InMemoryBackend {
 
         queue.last_access = Utc::now();
 
-        // Handle FIFO deduplication
+        // Handle FIFO deduplication and ordering for SQS FIFO queues
         if queue.config.queue_type == QueueType::SqsFifo {
             let dedup_id = if let Some(ref id) = message.deduplication_id {
                 id.clone()
@@ -348,6 +431,20 @@ impl StorageBackend for InMemoryBackend {
             queue.next_sequence_number += 1;
         }
 
+        // Handle ordering for Pub/Sub topics with ordering keys
+        if queue.config.queue_type == QueueType::PubSubTopic && message.message_group_id.is_some() {
+            // Assign sequence number for ordering
+            message.sequence_number = Some(queue.next_sequence_number);
+            debug!(
+                "Assigned seq={} to msg={} ordering_key={:?} queue={}",
+                queue.next_sequence_number,
+                message.id.0,
+                message.message_group_id,
+                queue_id
+            );
+            queue.next_sequence_number += 1;
+        }
+
         // Calculate when message becomes visible
         let delay = message.delay_seconds.unwrap_or(queue.config.delay_seconds);
         let visible_at = Utc::now() + Duration::seconds(delay as i64);
@@ -363,16 +460,31 @@ impl StorageBackend for InMemoryBackend {
             queue_id = %queue_id,
             message_id = %message.id,
             visible_in_seconds = delay,
-            "Message sent"
+            queue_length = queue.available_messages.len(),
+            message_group_id = ?message.message_group_id,
+            "Message sent to queue"
         );
 
         Ok(message)
     }
 
     async fn send_messages(&self, queue_id: &str, messages: Vec<Message>) -> Result<Vec<Message>> {
+        // Check eviction BEFORE acquiring the lock to avoid deadlock
+        self.maybe_evict().await?;
+
+        // Acquire write lock once for the entire batch to preserve ordering
+        // This prevents concurrent publishes from interleaving sequence numbers
+        let mut queues = self.inner.queues.write().await;
+
         let mut results = Vec::new();
         for message in messages {
-            results.push(self.send_message(queue_id, message).await?);
+            // Use the internal send_message_locked which assumes lock is held
+            let queue = queues
+                .get_mut(queue_id)
+                .ok_or_else(|| Error::QueueNotFound(queue_id.to_string()))?;
+
+            let result = self.send_message_locked(queue, queue_id, message).await?;
+            results.push(result);
         }
         Ok(results)
     }
@@ -474,28 +586,68 @@ impl StorageBackend for InMemoryBackend {
                 });
             }
         } else if queue.config.queue_type == QueueType::PubSubTopic {
-            // Pub/Sub topics: Deliver in order from queue, but allow multiple messages
-            // with same ordering key to be in-flight (client handles ordering via acks)
-            let mut i = 0;
-            while i < queue.available_messages.len() && received.len() < max_messages {
-                let stored = &queue.available_messages[i];
+            // Pub/Sub topics: Deliver messages in sequence number order for ordering keys
 
-                // Check if message is visible
-                if stored.visible_at > now {
-                    i += 1;
-                    continue;
-                }
+            debug!(
+                "PubSub receive: queue={}, available_messages={}, max_messages={}",
+                queue_id,
+                queue.available_messages.len(),
+                max_messages
+            );
 
-                // Remove from available messages
-                let stored = queue.available_messages.remove(i).unwrap();
+            // Collect all visible messages
+            let mut visible: Vec<(usize, StoredMessage)> = queue
+                .available_messages
+                .iter()
+                .enumerate()
+                .filter(|(_, stored)| stored.visible_at <= now)
+                .map(|(idx, stored)| (idx, stored.clone()))
+                .collect();
+
+            debug!(
+                "PubSub receive: {} visible messages before sorting",
+                visible.len()
+            );
+
+            // Sort by sequence number
+            visible.sort_by_key(|(_, stored)| stored.message.sequence_number);
+
+            debug!("PubSub receive: After sorting by sequence number:");
+
+            // Take up to max_messages
+            let to_process: Vec<(usize, StoredMessage)> = visible
+                .into_iter()
+                .take(max_messages)
+                .collect();
+
+            debug!(
+                "PubSub receive: Processing {} messages (max_messages={})",
+                to_process.len(),
+                max_messages
+            );
+
+            // Collect indices to remove (in descending order)
+            let mut indices: Vec<usize> = to_process.iter().map(|(idx, _)| *idx).collect();
+            indices.sort_by(|a, b| b.cmp(a));
+
+            // Remove from queue first (back to front so indices stay valid)
+            for idx in indices {
+                queue.available_messages.remove(idx);
+            }
+
+            // Process messages in sequence order
+            for (_, stored) in to_process {
                 let mut message = stored.message;
                 message.receive_count += 1;
 
-                // Generate receipt handle
                 let receipt_handle = generate_receipt_handle(queue_id, &message.id);
-
-                // Add to in-flight
                 let visibility_expires_at = now + Duration::seconds(visibility_timeout as i64);
+
+                debug!(
+                    "PubSub receive: Delivering msg_id={}, seq={:?}",
+                    message.id.0, message.sequence_number
+                );
+
                 queue.in_flight_messages.insert(
                     message.id.0.clone(),
                     InFlightMessage {

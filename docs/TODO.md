@@ -447,14 +447,14 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] `DetachSubscription` - detach subscription from topic (stub)
 
 ### 4.4 Subscriber Service Implementation ✅
-- [x] Implement Subscriber in `src/pubsub/subscriber.rs` (8/15 methods core, 7 stubs)
+- [x] Implement Subscriber in `src/pubsub/subscriber.rs` (9/15 methods core, 6 stubs)
   - [x] `CreateSubscription` - create new subscription with full config
   - [x] `GetSubscription` - retrieve subscription details
   - [x] `UpdateSubscription` - modify subscription settings (stub)
   - [x] `ListSubscriptions` - list subscriptions in project (with filtering)
   - [x] `DeleteSubscription` - remove subscription
   - [x] `Pull` - pull messages from subscription with visibility timeout
-  - [x] `StreamingPull` - bidirectional streaming pull (stub)
+  - [x] `StreamingPull` - bidirectional streaming pull with message ordering ✅ COMPLETE
   - [x] `Acknowledge` - ack received messages
   - [x] `ModifyAckDeadline` - extend ack deadline
   - [x] `ModifyPushConfig` - update push configuration (stub)
@@ -630,11 +630,11 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
 - Better resource utilization (persistent connections)
 - Closer parity with production Pub/Sub behavior
 
-### 4.7 Pub/Sub gRPC Integration Tests ✅
+### 4.7 Pub/Sub gRPC Integration Tests ✅ COMPLETE
 - [x] Create integration test suite
   - [x] Test with google-cloud-pubsub (Python) - **15/15 tests passing**
   - [x] Test with @google-cloud/pubsub (Node.js) - **16/16 tests passing**
-  - [x] Test with cloud.google.com/go/pubsub (Go) - **10/10 tests passing (3 skipped - StreamingPull)**
+  - [x] Test with cloud.google.com/go/pubsub (Go) - **13/13 tests passing** ✅
 - [x] Test scenarios (Python SDK)
   - [x] Create topic and subscription
   - [x] Get topic and subscription
@@ -659,7 +659,8 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Fixed list_subscriptions project filtering
   - [x] Fixed modify_ack_deadline receipt handle issue
   - [x] Fixed message ordering client configuration
-- [x] Test scenarios (Go SDK)
+  - [x] Fixed StreamingPull message ordering via subscription_properties flag
+- [x] Test scenarios (Go SDK) - **13/13 tests passing**
   - [x] Create and get topics
   - [x] List topics
   - [x] Delete topics
@@ -668,11 +669,9 @@ This document tracks all implementation tasks for lclq based on the PRD and Tech
   - [x] Delete subscriptions
   - [x] Publish single message
   - [x] Publish with attributes
-  - [ ] Pull messages (requires StreamingPull - skipped)
-  - [ ] Message ordering (requires StreamingPull - skipped)
-  - [ ] Modify ack deadline (requires StreamingPull - skipped)
-
-**Note**: 3 Go tests are skipped as the Go SDK's `subscription.Receive()` method uses StreamingPull, which is currently a stub (see section 4.8). All core Pub/Sub operations work correctly via the synchronous Pull API used by Python and JavaScript SDKs.
+  - [x] Pull messages (via StreamingPull) ✅
+  - [x] Message ordering (via StreamingPull) ✅
+  - [x] Modify ack deadline (via StreamingPull) ✅
 
 ---
 

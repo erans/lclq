@@ -179,7 +179,7 @@ impl Publisher for PublisherService {
         request: Request<PublishRequest>,
     ) -> std::result::Result<Response<PublishResponse>, Status> {
         let req = request.into_inner();
-        debug!("Publish: {} messages to {}", req.messages.len(), req.topic);
+        info!("Publish: {} messages to {}", req.messages.len(), req.topic);
 
         // Parse topic name
         let resource_name = ResourceName::parse(&req.topic)
@@ -197,19 +197,80 @@ impl Publisher for PublisherService {
         let mut messages = Vec::new();
         for msg in &req.messages {
             let message = Self::pubsub_message_to_message(msg, &topic_id);
+            debug!(
+                "Converting message: id={}, ordering_key={}",
+                message.id.0,
+                message.message_group_id.as_ref().unwrap_or(&"<none>".to_string())
+            );
             messages.push(message);
         }
 
-        // Publish messages
-        let published = self
+        // Get all subscriptions for this topic
+        let all_subscriptions = self
             .backend
-            .send_messages(&topic_id, messages)
+            .list_subscriptions()
             .await
-            .map_err(|e| Status::internal(format!("Failed to publish messages: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Failed to list subscriptions: {}", e)))?;
+
+        let topic_subscriptions: Vec<_> = all_subscriptions
+            .into_iter()
+            .filter(|s| s.topic_id == topic_id)
+            .collect();
+
+        debug!(
+            "Fanout: topic_id={}, subscriptions={}, messages={}",
+            topic_id,
+            topic_subscriptions.len(),
+            messages.len()
+        );
+
+        // Fanout messages to all subscriptions
+        let mut message_ids = Vec::new();
+        if topic_subscriptions.is_empty() {
+            // No subscriptions - just return the message IDs without storing
+            message_ids = messages.iter().map(|m| m.id.0.clone()).collect();
+        } else {
+            // Publish to each subscription
+            for sub in &topic_subscriptions {
+                debug!("Fanning out to subscription: {}", sub.id);
+
+                // Clone messages for this subscription (each subscription gets its own copy)
+                let sub_messages: Vec<_> = messages
+                    .iter()
+                    .map(|m| {
+                        let mut msg = m.clone();
+                        msg.queue_id = sub.id.clone();
+                        msg
+                    })
+                    .collect();
+
+                debug!(
+                    "Sending {} messages to subscription {}",
+                    sub_messages.len(),
+                    sub.id
+                );
+
+                let published = self
+                    .backend
+                    .send_messages(&sub.id, sub_messages)
+                    .await
+                    .map_err(|e| Status::internal(format!("Failed to publish messages to subscription {}: {}", sub.id, e)))?;
+
+                debug!(
+                    "Published {} messages to subscription {}, message_ids: {:?}",
+                    published.len(),
+                    sub.id,
+                    published.iter().map(|m| &m.id.0).collect::<Vec<_>>()
+                );
+
+                // Use message IDs from first subscription
+                if message_ids.is_empty() {
+                    message_ids = published.iter().map(|m| m.id.0.clone()).collect();
+                }
+            }
+        }
 
         // Build response with message IDs
-        let message_ids: Vec<String> = published.iter().map(|m| m.id.0.clone()).collect();
-
         let response = PublishResponse { message_ids };
         Ok(Response::new(response))
     }

@@ -558,6 +558,9 @@ func TestMessageOrdering(t *testing.T) {
 		}
 	}
 
+	// Stop topic to flush all pending ordered messages
+	topic.Stop()
+
 	t.Logf("✓ Published 5 ordered messages with key: %s", orderingKey)
 
 	// Pull messages and verify ordering
@@ -585,6 +588,8 @@ func TestMessageOrdering(t *testing.T) {
 	}
 
 	// Verify messages were received in order
+	t.Logf("Received sequence: %v", receivedSequence)
+
 	if len(receivedSequence) != expectedCount {
 		t.Errorf("Expected to receive %d messages, got %d", expectedCount, len(receivedSequence))
 	}

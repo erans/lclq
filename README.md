@@ -232,18 +232,18 @@ Fully compatible with official Google Cloud SDKs via both gRPC and HTTP/REST pro
 - ✅ Message publishing with attributes
 - ✅ Message ordering with ordering keys
 - ✅ Pull subscriptions (synchronous)
+- ✅ StreamingPull (bidirectional streaming with message ordering)
 - ✅ Acknowledgment deadline modification
 - ✅ Dead letter topics
 - ✅ Message retention configuration
 - ✅ Subscription filtering (basic)
-- 🚧 StreamingPull (bidirectional streaming - stub)
 - 🚧 Push subscriptions (planned)
 
-**Tested with 40/40 tests passing across 2 SDKs and 2 protocols:**
+**Tested with 53/53 tests passing across 3 SDKs and 2 protocols:**
 - Python gRPC (google-cloud-pubsub) - 15/15 tests ✓
 - Python REST (google-cloud-pubsub with REST transport) - 9/9 tests ✓
 - JavaScript gRPC (@google-cloud/pubsub) - 16/16 tests ✓
-- Go gRPC (cloud.google.com/go/pubsub) - 10/10 tests ✓ (3 skipped - require StreamingPull)
+- Go gRPC (cloud.google.com/go/pubsub) - 13/13 tests ✓
 
 ### Storage Backends
 

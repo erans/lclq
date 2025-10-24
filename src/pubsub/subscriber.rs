@@ -18,7 +18,7 @@ use crate::pubsub::proto::subscriber_server::Subscriber;
 use crate::pubsub::proto::*;
 use crate::pubsub::types::{validate_subscription_id, ResourceName};
 use crate::storage::StorageBackend;
-use crate::types::{ReceiveOptions, SubscriptionConfig};
+use crate::types::{QueueConfig, QueueType, ReceiveOptions, SubscriptionConfig};
 use base64::Engine;
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -164,7 +164,28 @@ impl Subscriber for SubscriberService {
         let config = Self::subscription_to_config(&subscription)
             .map_err(|e| Status::internal(format!("Failed to convert subscription: {}", e)))?;
 
-        // Create in backend
+        // Create a queue for this subscription to store its messages
+        let sub_queue_config = QueueConfig {
+            id: config.id.clone(),
+            name: config.name.clone(),
+            queue_type: QueueType::PubSubTopic, // Subscriptions use PubSubTopic queue type
+            visibility_timeout: config.ack_deadline_seconds,
+            message_retention_period: 604800, // 7 days
+            max_message_size: 10 * 1024 * 1024, // 10 MB
+            delay_seconds: 0,
+            dlq_config: None,
+            content_based_deduplication: false,
+            tags: std::collections::HashMap::new(),
+            redrive_allow_policy: None,
+        };
+
+        // Create the queue
+        self.backend
+            .create_queue(sub_queue_config)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to create subscription queue: {}", e)))?;
+
+        // Create the subscription metadata
         let created_config = self
             .backend
             .create_subscription(config)
@@ -275,7 +296,10 @@ impl Subscriber for SubscriberService {
             resource_name.resource_id()
         );
 
-        // Delete from backend
+        // Delete the subscription queue first
+        let _ = self.backend.delete_queue(&sub_id).await; // Ignore errors if queue doesn't exist
+
+        // Delete subscription metadata
         self.backend
             .delete_subscription(&sub_id)
             .await
@@ -466,6 +490,7 @@ impl Subscriber for SubscriberService {
             let mut subscription_id: Option<String> = None;
             let mut topic_id: Option<String> = None;
             let mut ack_deadline = 10; // Default 10 seconds
+            let mut message_ordering_enabled = false; // Track if ordering is enabled
 
             // Main stream loop
             loop {
@@ -492,12 +517,13 @@ impl Subscriber for SubscriberService {
                                                 Ok(config) => {
                                                     subscription_id = Some(sub_id.clone());
                                                     topic_id = Some(config.topic_id.clone());
+                                                    message_ordering_enabled = config.enable_message_ordering;
 
                                                     if req.stream_ack_deadline_seconds > 0 {
                                                         ack_deadline = req.stream_ack_deadline_seconds as u32;
                                                     }
 
-                                                    debug!("StreamingPull initialized for subscription: {}, topic: {}", sub_id, config.topic_id);
+                                                    debug!("StreamingPull initialized for subscription: {}, topic: {}, ordering_enabled: {}", sub_id, config.topic_id, message_ordering_enabled);
                                                 }
                                                 Err(e) => {
                                                     let _ = tx.send(Err(Status::not_found(format!("Subscription not found: {}", e)))).await;
@@ -514,9 +540,9 @@ impl Subscriber for SubscriberService {
 
                                 // Process acknowledgments
                                 if !req.ack_ids.is_empty() {
-                                    if let (Some(topic), Some(_)) = (&topic_id, &subscription_id) {
+                                    if let (Some(_topic), Some(sub_id)) = (&topic_id, &subscription_id) {
                                         for ack_id in &req.ack_ids {
-                                            if let Err(e) = backend.delete_message(topic, ack_id).await {
+                                            if let Err(e) = backend.delete_message(sub_id, ack_id).await {
                                                 debug!("Failed to acknowledge message {}: {}", ack_id, e);
                                             }
                                         }
@@ -525,10 +551,10 @@ impl Subscriber for SubscriberService {
 
                                 // Process modify deadline requests
                                 if !req.modify_deadline_ack_ids.is_empty() {
-                                    if let (Some(topic), Some(_)) = (&topic_id, &subscription_id) {
+                                    if let (Some(_topic), Some(sub_id)) = (&topic_id, &subscription_id) {
                                         for (i, ack_id) in req.modify_deadline_ack_ids.iter().enumerate() {
                                             let deadline = req.modify_deadline_seconds.get(i).copied().unwrap_or(10);
-                                            if let Err(e) = backend.change_visibility(topic, ack_id, deadline as u32).await {
+                                            if let Err(e) = backend.change_visibility(sub_id, ack_id, deadline as u32).await {
                                                 debug!("Failed to modify deadline for {}: {}", ack_id, e);
                                             }
                                         }
@@ -544,7 +570,7 @@ impl Subscriber for SubscriberService {
 
                     // Poll for messages to send to client
                     _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
-                        if let (Some(topic), Some(_)) = (&topic_id, &subscription_id) {
+                        if let (Some(_topic), Some(sub_id)) = (&topic_id, &subscription_id) {
                             let options = ReceiveOptions {
                                 max_messages: 10, // Pull up to 10 messages at a time
                                 visibility_timeout: Some(ack_deadline),
@@ -553,7 +579,7 @@ impl Subscriber for SubscriberService {
                                 message_attribute_names: vec![],
                             };
 
-                            match backend.receive_messages(topic, options).await {
+                            match backend.receive_messages(sub_id, options).await {
                                 Ok(messages) => {
                                     if !messages.is_empty() {
                                         // Convert to ReceivedMessage format
@@ -592,7 +618,10 @@ impl Subscriber for SubscriberService {
 
                                         let response = StreamingPullResponse {
                                             received_messages,
-                                            subscription_properties: None,
+                                            subscription_properties: Some(SubscriptionProperties {
+                                                exactly_once_delivery_enabled: false,
+                                                message_ordering_enabled,
+                                            }),
                                         };
 
                                         if tx.send(Ok(response)).await.is_err() {
