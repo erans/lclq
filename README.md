@@ -219,6 +219,11 @@ Fully compatible with official AWS SDKs (Python, JavaScript, Go, Rust, Java, Rub
 - Go (AWS SDK v2) - 7/7 tests ✓
 - Rust (AWS SDK) - 7/7 tests ✓
 
+**Comprehensive test coverage:**
+- 408 unit tests covering all core functionality
+- 66% code coverage (2890/4378 lines)
+- Zero warnings, all tests passing
+
 ### GCP Pub/Sub Compatibility ✅
 
 Fully compatible with official Google Cloud SDKs via both gRPC and HTTP/REST protocols.
@@ -474,8 +479,11 @@ cd lclq
 # Build
 cargo build --release
 
-# Run tests
+# Run tests (408 unit tests, 66% coverage)
 cargo test
+
+# Run with coverage
+LCLQ_RECEIPT_SECRET="test-secret" cargo tarpaulin --timeout 300
 
 # Run integration tests (requires Poetry and Node.js)
 cd tests/integration/python && poetry install && poetry run pytest
