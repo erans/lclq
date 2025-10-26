@@ -203,4 +203,29 @@ mod tests {
         // Should be rejected because signature is missing
         assert!(parse_receipt_handle(&handle).is_err());
     }
+
+    #[test]
+    fn test_receipt_handle_with_wrong_signature_length() {
+        setup_test_env();
+
+        // Create a valid receipt handle then tamper with signature length
+        let queue_id = "test-queue";
+        let message_id = MessageId::new();
+        let valid_handle = generate_receipt_handle(queue_id, &message_id);
+
+        // Decode it
+        let decoded = STANDARD.decode(&valid_handle).unwrap();
+        let json = String::from_utf8(decoded).unwrap();
+        let mut data: ReceiptHandleData = serde_json::from_str(&json).unwrap();
+
+        // Replace signature with one of wrong length (truncated)
+        data.signature = Some("abc123".to_string()); // Too short
+
+        // Re-encode
+        let tampered_json = serde_json::to_string(&data).unwrap();
+        let tampered_handle = STANDARD.encode(tampered_json.as_bytes());
+
+        // Should be rejected due to signature length mismatch
+        assert!(parse_receipt_handle(&tampered_handle).is_err());
+    }
 }

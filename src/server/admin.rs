@@ -814,4 +814,86 @@ mod tests {
         let error: ErrorResponse = extract_json(response).await;
         assert!(error.error.contains("not found") || error.error.contains("Not found"));
     }
+
+    #[tokio::test]
+    async fn test_error_invalid_input() {
+        // Test InvalidInput error response (line 103)
+        let error = AdminError::InvalidInput("Invalid queue name".to_string());
+        let response = error.into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_error_backend_error() {
+        // Test BackendError error response (line 104)
+        let error = AdminError::BackendError("Database connection failed".to_string());
+        let response = error.into_response();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn test_error_conversion_validation() {
+        // Test From<crate::Error> for Validation error (line 115)
+        let err = crate::Error::Validation(crate::error::ValidationError::InvalidParameter {
+            name: "QueueName".to_string(),
+            reason: "Too long".to_string(),
+        });
+
+        let admin_err: AdminError = err.into();
+        let response = admin_err.into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_error_conversion_queue_not_found() {
+        // Test From<crate::Error> for QueueNotFound (line 114)
+        let err = crate::Error::QueueNotFound("test-queue".to_string());
+
+        let admin_err: AdminError = err.into();
+        let response = admin_err.into_response();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_error_conversion_other_errors() {
+        // Test From<crate::Error> for other errors (line 116)
+        let err = crate::Error::InvalidReceiptHandle;
+
+        let admin_err: AdminError = err.into();
+        let response = admin_err.into_response();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn test_start_admin_server_lifecycle() {
+        use tokio::sync::broadcast;
+
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+
+        // Start server in background
+        let server_handle = tokio::spawn(async move {
+            start_admin_server(backend, "127.0.0.1".to_string(), 0, shutdown_rx).await
+        });
+
+        // Give server time to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Trigger shutdown (covers lines 293-326)
+        let _ = shutdown_tx.send(());
+
+        // Wait for graceful shutdown
+        let result = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            server_handle
+        ).await;
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().unwrap().is_ok());
+    }
 }

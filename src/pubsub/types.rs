@@ -308,4 +308,101 @@ mod tests {
         let large_msg = vec![0u8; 11 * 1024 * 1024];
         assert!(validate_message_size(&large_msg).is_err());
     }
+
+    #[test]
+    fn test_resource_name_snapshot_parsing() {
+        // Test snapshot parsing (lines 57-59)
+        let name = "projects/test-project/snapshots/test-snapshot";
+        let parsed = ResourceName::parse(name).unwrap();
+
+        match &parsed {
+            ResourceName::Snapshot { project, snapshot } => {
+                assert_eq!(project, "test-project");
+                assert_eq!(snapshot, "test-snapshot");
+            }
+            _ => panic!("Expected Snapshot variant"),
+        }
+
+        // Test snapshot project() method (line 73)
+        assert_eq!(parsed.project(), "test-project");
+
+        // Test snapshot resource_id() method (line 82)
+        assert_eq!(parsed.resource_id(), "test-snapshot");
+    }
+
+    #[test]
+    fn test_resource_name_unknown_type() {
+        // Test unknown resource type error (lines 61-63)
+        let name = "projects/test-project/unknown/test-resource";
+        let result = ResourceName::parse(name);
+
+        assert!(result.is_err());
+        match result {
+            Err(Error::Validation(ValidationError::InvalidParameter { name, reason })) => {
+                assert_eq!(name, "resource_type");
+                assert!(reason.contains("Unknown resource type"));
+            }
+            _ => panic!("Expected InvalidParameter error"),
+        }
+    }
+
+    #[test]
+    fn test_resource_name_snapshot_formatting() {
+        // Test snapshot() formatting function (lines 104-108)
+        let snapshot = ResourceName::snapshot("test-project", "test-snapshot");
+        assert_eq!(snapshot, "projects/test-project/snapshots/test-snapshot");
+    }
+
+    #[test]
+    fn test_resource_name_display() {
+        // Test Display trait for Topic (lines 116-117)
+        let topic = ResourceName::Topic {
+            project: "test-project".to_string(),
+            topic: "test-topic".to_string(),
+        };
+        assert_eq!(topic.to_string(), "projects/test-project/topics/test-topic");
+
+        // Test Display trait for Subscription (lines 119-123)
+        let subscription = ResourceName::Subscription {
+            project: "test-project".to_string(),
+            subscription: "test-sub".to_string(),
+        };
+        assert_eq!(subscription.to_string(), "projects/test-project/subscriptions/test-sub");
+
+        // Test Display trait for Snapshot (lines 125-126)
+        let snapshot = ResourceName::Snapshot {
+            project: "test-project".to_string(),
+            snapshot: "test-snapshot".to_string(),
+        };
+        assert_eq!(snapshot.to_string(), "projects/test-project/snapshots/test-snapshot");
+    }
+
+    #[test]
+    fn test_subscription_id_invalid_character() {
+        // Test invalid character error for subscription ID (lines 192-193)
+        let result = validate_subscription_id("sub@invalid");
+
+        assert!(result.is_err());
+        match result {
+            Err(Error::Validation(ValidationError::InvalidSubscriptionId(msg))) => {
+                assert!(msg.contains("invalid character"));
+            }
+            _ => panic!("Expected InvalidSubscriptionId error"),
+        }
+    }
+
+    #[test]
+    fn test_project_id_invalid_character() {
+        // Test invalid character error for project ID (lines 229-231)
+        let result = validate_project_id("project@invalid");
+
+        assert!(result.is_err());
+        match result {
+            Err(Error::Validation(ValidationError::InvalidParameter { name, reason })) => {
+                assert_eq!(name, "project_id");
+                assert!(reason.contains("invalid character"));
+            }
+            _ => panic!("Expected InvalidParameter error"),
+        }
+    }
 }

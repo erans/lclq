@@ -212,3 +212,63 @@ pub struct DeadLetterPolicy {
     /// Max delivery attempts.
     pub max_delivery_attempts: u32,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_message_id_new() {
+        let id1 = MessageId::new();
+        let id2 = MessageId::new();
+
+        // Each ID should be unique
+        assert_ne!(id1, id2);
+
+        // Should be valid UUID format (36 chars with dashes)
+        assert_eq!(id1.0.len(), 36);
+    }
+
+    #[test]
+    fn test_message_id_from_string() {
+        let id_str = "test-message-id".to_string();
+        let id = MessageId::from_string(id_str.clone());
+
+        assert_eq!(id.0, id_str);
+    }
+
+    #[test]
+    fn test_message_id_default() {
+        let id = MessageId::default();
+
+        // Default should create a new random ID
+        assert_eq!(id.0.len(), 36);
+    }
+
+    #[test]
+    fn test_message_id_display() {
+        let id_str = "test-display-id".to_string();
+        let id = MessageId::from_string(id_str.clone());
+
+        assert_eq!(format!("{}", id), id_str);
+    }
+
+    #[test]
+    fn test_message_id_clone_and_eq() {
+        let id = MessageId::from_string("test-id".to_string());
+        let cloned = id.clone();
+
+        assert_eq!(id, cloned);
+    }
+
+    #[test]
+    fn test_receive_options_default() {
+        let opts = ReceiveOptions::default();
+
+        assert_eq!(opts.max_messages, 1);
+        assert_eq!(opts.visibility_timeout, None);
+        assert_eq!(opts.wait_time_seconds, 0);
+        assert_eq!(opts.attribute_names.len(), 0);
+        assert_eq!(opts.message_attribute_names.len(), 0);
+    }
+}

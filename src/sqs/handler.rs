@@ -2281,5 +2281,1416 @@ mod tests {
         assert!(response.contains("<Error>"));
         assert!(response.contains("MissingParameter"));
     }
+
+    // ========================================================================
+    // Core SQS Operation Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_create_queue_standard() {
+        let handler = create_test_handler();
+
+        let mut params = HashMap::new();
+        params.insert("QueueName".to_string(), "test-standard-queue".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::CreateQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        assert!(response.contains("CreateQueueResponse"));
+        assert!(response.contains("QueueUrl"));
+        assert!(response.contains("test-standard-queue"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_create_queue_fifo() {
+        let handler = create_test_handler();
+
+        let mut params = HashMap::new();
+        params.insert("QueueName".to_string(), "test-fifo-queue.fifo".to_string());
+        params.insert("Attribute.FifoQueue".to_string(), "true".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::CreateQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        assert!(response.contains("CreateQueueResponse"));
+        assert!(response.contains("test-fifo-queue.fifo"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_get_queue_url_success() {
+        let handler = create_test_handler();
+
+        // Create a queue first
+        create_test_queue(&handler, "test-geturl-queue").await;
+
+        // Get the queue URL
+        let mut params = HashMap::new();
+        params.insert("QueueName".to_string(), "test-geturl-queue".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::GetQueueUrl,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        assert!(response.contains("GetQueueUrlResponse"));
+        assert!(response.contains("QueueUrl"));
+        assert!(response.contains("test-geturl-queue"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_delete_queue_success() {
+        let handler = create_test_handler();
+
+        // Create a queue first
+        create_test_queue(&handler, "test-delete-queue").await;
+
+        // Delete the queue
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-queue".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::DeleteQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        // Response may be empty or contain DeleteQueueResponse - both are valid
+        assert!(response.contains("DeleteQueueResponse") || !response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_list_queues_success() {
+        let handler = create_test_handler();
+
+        // Create a few queues
+        create_test_queue(&handler, "test-list-queue-1").await;
+        create_test_queue(&handler, "test-list-queue-2").await;
+
+        // List queues
+        let params = HashMap::new();
+
+        let request = SqsRequest {
+            action: SqsAction::ListQueues,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        assert!(response.contains("ListQueuesResponse"));
+        assert!(response.contains("test-list-queue-1"));
+        assert!(response.contains("test-list-queue-2"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_send_message_success() {
+        let handler = create_test_handler();
+
+        // Create a queue first
+        create_test_queue(&handler, "test-send-queue").await;
+
+        // Send a message
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-send-queue".to_string());
+        params.insert("MessageBody".to_string(), "Hello, SQS!".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SendMessage,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        assert!(response.contains("SendMessageResponse"));
+        assert!(response.contains("MessageId"));
+        assert!(response.contains("MD5OfMessageBody"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_send_message_batch_success() {
+        let handler = create_test_handler();
+
+        // Create a queue first
+        create_test_queue(&handler, "test-send-batch-queue").await;
+
+        // Send batch messages
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-send-batch-queue".to_string());
+        params.insert("SendMessageBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
+        params.insert("SendMessageBatchRequestEntry.1.MessageBody".to_string(), "Message 1".to_string());
+        params.insert("SendMessageBatchRequestEntry.2.Id".to_string(), "msg2".to_string());
+        params.insert("SendMessageBatchRequestEntry.2.MessageBody".to_string(), "Message 2".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SendMessageBatch,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        assert!(response.contains("SendMessageBatchResponse"));
+        assert!(response.contains("SendMessageBatchResultEntry"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_receive_message_success() {
+        let handler = create_test_handler();
+
+        // Create a queue and send a message
+        create_test_queue(&handler, "test-receive-queue").await;
+
+        let mut send_params = HashMap::new();
+        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-receive-queue".to_string());
+        send_params.insert("MessageBody".to_string(), "Test message".to_string());
+
+        handler.handle_request(SqsRequest {
+            action: SqsAction::SendMessage,
+            params: send_params,
+            is_json: false,
+        }).await;
+
+        // Receive the message
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-receive-queue".to_string());
+        params.insert("MaxNumberOfMessages".to_string(), "1".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::ReceiveMessage,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        assert!(response.contains("ReceiveMessageResponse"));
+        assert!(response.contains("Test message"));
+        assert!(response.contains("ReceiptHandle"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_delete_message_success() {
+        let handler = create_test_handler();
+
+        // Create queue, send and receive message
+        create_test_queue(&handler, "test-delete-msg-queue").await;
+
+        let mut send_params = HashMap::new();
+        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-msg-queue".to_string());
+        send_params.insert("MessageBody".to_string(), "Delete me".to_string());
+
+        handler.handle_request(SqsRequest {
+            action: SqsAction::SendMessage,
+            params: send_params,
+            is_json: false,
+        }).await;
+
+        let mut receive_params = HashMap::new();
+        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-msg-queue".to_string());
+
+        let (receive_response, _) = handler.handle_request(SqsRequest {
+            action: SqsAction::ReceiveMessage,
+            params: receive_params,
+            is_json: false,
+        }).await;
+
+        // Extract receipt handle (simple parsing)
+        let receipt_start = receive_response.find("<ReceiptHandle>").unwrap() + 15;
+        let receipt_end = receive_response.find("</ReceiptHandle>").unwrap();
+        let receipt_handle = &receive_response[receipt_start..receipt_end];
+
+        // Delete the message
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-msg-queue".to_string());
+        params.insert("ReceiptHandle".to_string(), receipt_handle.to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::DeleteMessage,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        assert!(response.contains("DeleteMessageResponse"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_purge_queue_success() {
+        let handler = create_test_handler();
+
+        // Create queue and send messages
+        create_test_queue(&handler, "test-purge-queue").await;
+
+        let mut send_params = HashMap::new();
+        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-purge-queue".to_string());
+        send_params.insert("MessageBody".to_string(), "Message to purge".to_string());
+
+        handler.handle_request(SqsRequest {
+            action: SqsAction::SendMessage,
+            params: send_params,
+            is_json: false,
+        }).await;
+
+        // Purge the queue
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-purge-queue".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::PurgeQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        // Response may be empty or contain PurgeQueueResponse - both are valid
+        assert!(response.contains("PurgeQueueResponse") || !response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_get_queue_attributes_success() {
+        let handler = create_test_handler();
+
+        // Create a queue first
+        create_test_queue(&handler, "test-getattrs-queue").await;
+
+        // Get queue attributes
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-getattrs-queue".to_string());
+        params.insert("AttributeName.1".to_string(), "All".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::GetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        assert!(response.contains("GetQueueAttributesResponse"));
+        assert!(response.contains("Attribute"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_set_queue_attributes_success() {
+        let handler = create_test_handler();
+
+        // Create a queue first
+        create_test_queue(&handler, "test-setattrs-queue").await;
+
+        // Set queue attributes
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-setattrs-queue".to_string());
+        params.insert("Attribute.VisibilityTimeout".to_string(), "60".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+
+        assert_eq!(content_type, "application/xml");
+        // Response may be empty or contain SetQueueAttributesResponse - both are valid
+        assert!(response.contains("SetQueueAttributesResponse") || !response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_delete_message_batch_success() {
+        let handler = create_test_handler();
+
+        // Create queue and send messages
+        create_test_queue(&handler, "test-delete-batch-queue").await;
+
+        for i in 1..=2 {
+            let mut send_params = HashMap::new();
+            send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-batch-queue".to_string());
+            send_params.insert("MessageBody".to_string(), format!("Message {}", i));
+
+            handler.handle_request(SqsRequest {
+                action: SqsAction::SendMessage,
+                params: send_params,
+                is_json: false,
+            }).await;
+        }
+
+        // Receive messages
+        let mut receive_params = HashMap::new();
+        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-batch-queue".to_string());
+        receive_params.insert("MaxNumberOfMessages".to_string(), "10".to_string());
+
+        let (receive_response, _) = handler.handle_request(SqsRequest {
+            action: SqsAction::ReceiveMessage,
+            params: receive_params,
+            is_json: false,
+        }).await;
+
+        // Extract receipt handles (simple parsing - get first two)
+        let receipt_handles: Vec<String> = receive_response
+            .match_indices("<ReceiptHandle>")
+            .take(2)
+            .map(|(start, _)| {
+                let content_start = start + 15;
+                let content_end = receive_response[content_start..].find("</ReceiptHandle>").unwrap() + content_start;
+                receive_response[content_start..content_end].to_string()
+            })
+            .collect();
+
+        if receipt_handles.len() >= 2 {
+            // Delete messages in batch
+            let mut params = HashMap::new();
+            params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-batch-queue".to_string());
+            params.insert("DeleteMessageBatchRequestEntry.1.Id".to_string(), "entry1".to_string());
+            params.insert("DeleteMessageBatchRequestEntry.1.ReceiptHandle".to_string(), receipt_handles[0].clone());
+            params.insert("DeleteMessageBatchRequestEntry.2.Id".to_string(), "entry2".to_string());
+            params.insert("DeleteMessageBatchRequestEntry.2.ReceiptHandle".to_string(), receipt_handles[1].clone());
+
+            let request = SqsRequest {
+                action: SqsAction::DeleteMessageBatch,
+                params,
+                is_json: false,
+            };
+
+            let (response, content_type) = handler.handle_request(request).await;
+
+            assert_eq!(content_type, "application/xml");
+            assert!(response.contains("DeleteMessageBatchResponse"));
+            assert!(!response.contains("<Error>"));
+        }
+    }
+
+    // ========================================================================
+    // Advanced CreateQueue Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_create_queue_with_redrive_policy() {
+        let handler = create_test_handler();
+
+        // Create DLQ first
+        create_test_queue(&handler, "dlq-queue").await;
+
+        // Create queue with redrive policy
+        let mut params = HashMap::new();
+        params.insert("QueueName".to_string(), "queue-with-dlq".to_string());
+        params.insert("Attribute.RedrivePolicy".to_string(),
+            r#"{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:dlq-queue","maxReceiveCount":"5"}"#.to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::CreateQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("CreateQueueResponse"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_create_queue_with_redrive_allow_policy() {
+        let handler = create_test_handler();
+
+        let mut params = HashMap::new();
+        params.insert("QueueName".to_string(), "queue-with-rap".to_string());
+        params.insert("Attribute.RedriveAllowPolicy".to_string(),
+            r#"{"redrivePermission":"allowAll"}"#.to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::CreateQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("CreateQueueResponse"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_create_queue_missing_name() {
+        let handler = create_test_handler();
+
+        let params = HashMap::new();
+
+        let request = SqsRequest {
+            action: SqsAction::CreateQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("MissingParameter"));
+    }
+
+    // ========================================================================
+    // GetQueueAttributes Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_queue_attributes_specific() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-attrs-queue").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-attrs-queue".to_string());
+        params.insert("AttributeName.1".to_string(), "VisibilityTimeout".to_string());
+        params.insert("AttributeName.2".to_string(), "DelaySeconds".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::GetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("GetQueueAttributesResponse"));
+        assert!(response.contains("VisibilityTimeout"));
+    }
+
+    #[tokio::test]
+    async fn test_get_queue_attributes_missing_queue_url() {
+        let handler = create_test_handler();
+
+        let params = HashMap::new();
+
+        let request = SqsRequest {
+            action: SqsAction::GetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("MissingParameter"));
+    }
+
+    // ========================================================================
+    // SetQueueAttributes Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_set_queue_attributes_message_retention() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-set-retention").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-set-retention".to_string());
+        params.insert("Attribute.MessageRetentionPeriod".to_string(), "86400".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_set_queue_attributes_invalid_visibility_timeout() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-invalid-vis").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-invalid-vis".to_string());
+        params.insert("Attribute.1.Name".to_string(), "VisibilityTimeout".to_string());
+        params.insert("Attribute.1.Value".to_string(), "99999".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("InvalidParameterValue"));
+    }
+
+    #[tokio::test]
+    async fn test_set_queue_attributes_invalid_retention() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-invalid-retention").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-invalid-retention".to_string());
+        params.insert("Attribute.1.Name".to_string(), "MessageRetentionPeriod".to_string());
+        params.insert("Attribute.1.Value".to_string(), "30".to_string()); // Too short
+
+        let request = SqsRequest {
+            action: SqsAction::SetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_set_queue_attributes_content_based_dedup_non_fifo() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-standard-queue").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-standard-queue".to_string());
+        params.insert("Attribute.1.Name".to_string(), "ContentBasedDeduplication".to_string());
+        params.insert("Attribute.1.Value".to_string(), "true".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("only valid for FIFO"));
+    }
+
+    // ========================================================================
+    // Error Case Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_queue_url_not_found() {
+        let handler = create_test_handler();
+
+        let mut params = HashMap::new();
+        params.insert("QueueName".to_string(), "nonexistent-queue".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::GetQueueUrl,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("NonExistentQueue"));
+    }
+
+    #[tokio::test]
+    async fn test_send_message_missing_body() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-queue").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SendMessage,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("MissingParameter"));
+    }
+
+    #[tokio::test]
+    async fn test_send_message_batch_empty() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-batch-empty").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-batch-empty".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SendMessageBatch,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("No batch entries"));
+    }
+
+    #[tokio::test]
+    async fn test_delete_message_missing_receipt() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-delete-missing").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-missing".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::DeleteMessage,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("MissingParameter"));
+    }
+
+    #[tokio::test]
+    async fn test_change_visibility_missing_timeout() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-change-vis").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-change-vis".to_string());
+        params.insert("ReceiptHandle".to_string(), "dummy-handle".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::ChangeMessageVisibility,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("MissingParameter"));
+    }
+
+    #[tokio::test]
+    async fn test_change_visibility_batch_empty() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-change-batch-empty").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-change-batch-empty".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::ChangeMessageVisibilityBatch,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("No batch entries"));
+    }
+
+    // ========================================================================
+    // JSON Protocol Tests (xml_to_json_response coverage)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_create_queue_json_response() {
+        let handler = create_test_handler();
+
+        let mut params = HashMap::new();
+        params.insert("QueueName".to_string(), "test-json-queue".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::CreateQueue,
+            params,
+            is_json: true,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+        assert_eq!(content_type, "application/x-amz-json-1.0");
+        assert!(response.contains("QueueUrl"));
+    }
+
+    #[tokio::test]
+    async fn test_send_message_json_response() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-json-send").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-send".to_string());
+        params.insert("MessageBody".to_string(), "JSON test message".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SendMessage,
+            params,
+            is_json: true,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+        assert_eq!(content_type, "application/x-amz-json-1.0");
+        assert!(response.contains("MessageId"));
+        assert!(response.contains("MD5OfMessageBody"));
+    }
+
+    #[tokio::test]
+    async fn test_receive_message_json_response() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-json-receive").await;
+
+        // Send a message first
+        let mut send_params = HashMap::new();
+        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-receive".to_string());
+        send_params.insert("MessageBody".to_string(), "JSON receive test".to_string());
+        handler.handle_request(SqsRequest {
+            action: SqsAction::SendMessage,
+            params: send_params,
+            is_json: false,
+        }).await;
+
+        // Receive with JSON response
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-receive".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::ReceiveMessage,
+            params,
+            is_json: true,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+        assert_eq!(content_type, "application/x-amz-json-1.0");
+        assert!(response.contains("Messages"));
+    }
+
+    #[tokio::test]
+    async fn test_list_queues_json_response() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-json-list-1").await;
+        create_test_queue(&handler, "test-json-list-2").await;
+
+        let params = HashMap::new();
+
+        let request = SqsRequest {
+            action: SqsAction::ListQueues,
+            params,
+            is_json: true,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+        assert_eq!(content_type, "application/x-amz-json-1.0");
+        assert!(response.contains("QueueUrls"));
+    }
+
+    #[tokio::test]
+    async fn test_get_queue_attributes_json_response() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-json-getattrs").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-getattrs".to_string());
+        params.insert("AttributeName.1".to_string(), "All".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::GetQueueAttributes,
+            params,
+            is_json: true,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+        assert_eq!(content_type, "application/x-amz-json-1.0");
+        assert!(response.contains("Attributes"));
+    }
+
+    #[tokio::test]
+    async fn test_delete_message_json_response() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-json-delete").await;
+
+        // Send and receive a message to get receipt handle
+        let mut send_params = HashMap::new();
+        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-delete".to_string());
+        send_params.insert("MessageBody".to_string(), "Delete me".to_string());
+        handler.handle_request(SqsRequest {
+            action: SqsAction::SendMessage,
+            params: send_params,
+            is_json: false,
+        }).await;
+
+        let mut receive_params = HashMap::new();
+        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-delete".to_string());
+        let (receive_response, _) = handler.handle_request(SqsRequest {
+            action: SqsAction::ReceiveMessage,
+            params: receive_params,
+            is_json: false,
+        }).await;
+
+        let receipt_start = receive_response.find("<ReceiptHandle>").unwrap() + 15;
+        let receipt_end = receive_response.find("</ReceiptHandle>").unwrap();
+        let receipt_handle = &receive_response[receipt_start..receipt_end];
+
+        // Delete with JSON response
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-delete".to_string());
+        params.insert("ReceiptHandle".to_string(), receipt_handle.to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::DeleteMessage,
+            params,
+            is_json: true,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+        assert_eq!(content_type, "application/x-amz-json-1.0");
+        // DeleteMessage returns empty JSON
+        assert_eq!(response, "{}");
+    }
+
+    #[tokio::test]
+    async fn test_send_message_batch_json_response() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-json-batch").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-batch".to_string());
+        params.insert("SendMessageBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
+        params.insert("SendMessageBatchRequestEntry.1.MessageBody".to_string(), "Message 1".to_string());
+        params.insert("SendMessageBatchRequestEntry.2.Id".to_string(), "msg2".to_string());
+        params.insert("SendMessageBatchRequestEntry.2.MessageBody".to_string(), "Message 2".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SendMessageBatch,
+            params,
+            is_json: true,
+        };
+
+        let (response, content_type) = handler.handle_request(request).await;
+        assert_eq!(content_type, "application/x-amz-json-1.0");
+        assert!(response.contains("Successful"));
+    }
+
+    // ========================================================================
+    // SetQueueAttributes Error Path Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_set_queue_attributes_invalid_redrive_policy_json() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-invalid-redrive-json").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-invalid-redrive-json".to_string());
+        params.insert("Attribute.1.Name".to_string(), "RedrivePolicy".to_string());
+        params.insert("Attribute.1.Value".to_string(), "invalid json here".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("Invalid RedrivePolicy JSON"));
+    }
+
+    #[tokio::test]
+    async fn test_set_queue_attributes_invalid_redrive_policy_format() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-invalid-redrive-format").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-invalid-redrive-format".to_string());
+        params.insert("Attribute.1.Name".to_string(), "RedrivePolicy".to_string());
+        // Missing deadLetterTargetArn field
+        params.insert("Attribute.1.Value".to_string(), r#"{"maxReceiveCount":"5"}"#.to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("Invalid RedrivePolicy format"));
+    }
+
+    #[tokio::test]
+    async fn test_set_queue_attributes_invalid_redrive_allow_policy_json() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-invalid-rap-json").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-invalid-rap-json".to_string());
+        params.insert("Attribute.1.Name".to_string(), "RedriveAllowPolicy".to_string());
+        params.insert("Attribute.1.Value".to_string(), "not valid json".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("Invalid RedriveAllowPolicy JSON"));
+    }
+
+    #[tokio::test]
+    async fn test_set_queue_attributes_invalid_redrive_permission_value() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-invalid-rap-perm").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-invalid-rap-perm".to_string());
+        params.insert("Attribute.1.Name".to_string(), "RedriveAllowPolicy".to_string());
+        params.insert("Attribute.1.Value".to_string(), r#"{"redrivePermission":"invalidValue"}"#.to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("Invalid redrivePermission value"));
+    }
+
+    #[tokio::test]
+    async fn test_set_queue_attributes_missing_redrive_permission() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-missing-rap-perm").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-missing-rap-perm".to_string());
+        params.insert("Attribute.1.Name".to_string(), "RedriveAllowPolicy".to_string());
+        params.insert("Attribute.1.Value".to_string(), r#"{"somethingElse":"value"}"#.to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("<Error>"));
+        assert!(response.contains("Missing redrivePermission"));
+    }
+
+    // ========================================================================
+    // SendMessageBatch Error Path Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_send_message_batch_message_too_large() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-batch-too-large").await;
+
+        let large_body = "x".repeat(300_000); // Exceeds SQS_MAX_MESSAGE_SIZE
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-batch-too-large".to_string());
+        params.insert("SendMessageBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
+        params.insert("SendMessageBatchRequestEntry.1.MessageBody".to_string(), large_body);
+
+        let request = SqsRequest {
+            action: SqsAction::SendMessageBatch,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        // Should return a batch response with a failed entry
+        assert!(response.contains("SendMessageBatchResponse"));
+        assert!(response.contains("BatchResultErrorEntry"));
+        assert!(response.contains("MessageTooLong"));
+    }
+
+    // ========================================================================
+    // CreateQueue RedriveAllowPolicy Error Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_create_queue_invalid_redrive_allow_policy_json() {
+        let handler = create_test_handler();
+
+        let mut params = HashMap::new();
+        params.insert("QueueName".to_string(), "test-create-invalid-rap".to_string());
+        params.insert("Attribute.RedriveAllowPolicy".to_string(), "not valid json".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::CreateQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        // Invalid JSON should be silently ignored during create (AWS behavior)
+        // The queue is created successfully
+        assert!(response.contains("CreateQueueResponse"));
+    }
+
+    #[tokio::test]
+    async fn test_create_queue_redrive_allow_policy_deny_all() {
+        let handler = create_test_handler();
+
+        let mut params = HashMap::new();
+        params.insert("QueueName".to_string(), "test-create-rap-deny".to_string());
+        params.insert("Attribute.RedriveAllowPolicy".to_string(), r#"{"redrivePermission":"denyAll"}"#.to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::CreateQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("CreateQueueResponse"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_create_queue_redrive_allow_policy_by_queue() {
+        let handler = create_test_handler();
+
+        let mut params = HashMap::new();
+        params.insert("QueueName".to_string(), "test-create-rap-byqueue".to_string());
+        params.insert("Attribute.RedriveAllowPolicy".to_string(),
+            r#"{"redrivePermission":"byQueue","sourceQueueArns":["arn:aws:sqs:us-east-1:123456789012:source-queue"]}"#.to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::CreateQueue,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("CreateQueueResponse"));
+        assert!(!response.contains("<Error>"));
+    }
+
+    // ========================================================================
+    // Message Attributes Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_send_message_with_binary_attribute() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-binary-attr").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-binary-attr".to_string());
+        params.insert("MessageBody".to_string(), "Message with binary attr".to_string());
+        params.insert("MessageAttribute.1.Name".to_string(), "BinaryData".to_string());
+        params.insert("MessageAttribute.1.Value.DataType".to_string(), "Binary".to_string());
+        params.insert("MessageAttribute.1.Value.BinaryValue".to_string(), "aGVsbG8=".to_string()); // base64 "hello"
+
+        let request = SqsRequest {
+            action: SqsAction::SendMessage,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("SendMessageResponse"));
+        assert!(response.contains("MessageId"));
+    }
+
+    #[tokio::test]
+    async fn test_receive_message_with_message_attributes() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-receive-attrs").await;
+
+        // Send a message with attributes
+        let mut send_params = HashMap::new();
+        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-receive-attrs".to_string());
+        send_params.insert("MessageBody".to_string(), "Test message".to_string());
+        send_params.insert("MessageAttribute.1.Name".to_string(), "TestAttr".to_string());
+        send_params.insert("MessageAttribute.1.Value.DataType".to_string(), "String".to_string());
+        send_params.insert("MessageAttribute.1.Value.StringValue".to_string(), "TestValue".to_string());
+
+        handler.handle_request(SqsRequest {
+            action: SqsAction::SendMessage,
+            params: send_params,
+            is_json: false,
+        }).await;
+
+        // Receive the message
+        let mut receive_params = HashMap::new();
+        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-receive-attrs".to_string());
+        receive_params.insert("MaxNumberOfMessages".to_string(), "1".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::ReceiveMessage,
+            params: receive_params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("ReceiveMessageResponse"));
+        assert!(response.contains("MessageAttribute"));
+        assert!(response.contains("TestAttr"));
+        assert!(response.contains("TestValue"));
+    }
+
+    #[tokio::test]
+    async fn test_set_queue_attributes_redrive_allow_policy_by_queue() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-set-rap-byqueue").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-set-rap-byqueue".to_string());
+        params.insert("Attribute.1.Name".to_string(), "RedriveAllowPolicy".to_string());
+        params.insert("Attribute.1.Value".to_string(),
+            r#"{"redrivePermission":"byQueue","sourceQueueArns":["arn:aws:sqs:us-east-1:123456789012:source1","arn:aws:sqs:us-east-1:123456789012:source2"]}"#.to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(!response.contains("<Error>"));
+    }
+
+    #[tokio::test]
+    async fn test_set_queue_attributes_redrive_allow_policy_deny_all() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-set-rap-deny").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-set-rap-deny".to_string());
+        params.insert("Attribute.1.Name".to_string(), "RedriveAllowPolicy".to_string());
+        params.insert("Attribute.1.Value".to_string(), r#"{"redrivePermission":"denyAll"}"#.to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::SetQueueAttributes,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(!response.contains("<Error>"));
+    }
+
+    // ========================================================================
+    // Batch Operation Error Path Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_delete_message_batch_invalid_receipt() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-del-batch-invalid").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-del-batch-invalid".to_string());
+        params.insert("DeleteMessageBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
+        params.insert("DeleteMessageBatchRequestEntry.1.ReceiptHandle".to_string(), "invalid-receipt-handle".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::DeleteMessageBatch,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("DeleteMessageBatchResponse"));
+        assert!(response.contains("BatchResultErrorEntry"));
+        assert!(response.contains("ReceiptHandleIsInvalid"));
+    }
+
+    #[tokio::test]
+    async fn test_change_visibility_batch_invalid_timeout() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-vis-batch-invalid").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-vis-batch-invalid".to_string());
+        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
+        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(), "dummy-handle".to_string());
+        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(), "99999".to_string()); // Too large
+
+        let request = SqsRequest {
+            action: SqsAction::ChangeMessageVisibilityBatch,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("ChangeMessageVisibilityBatchResponse"));
+        assert!(response.contains("BatchResultErrorEntry"));
+        assert!(response.contains("InvalidParameterValue"));
+    }
+
+    #[tokio::test]
+    async fn test_change_visibility_batch_invalid_receipt() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-vis-batch-invalid-rec").await;
+
+        let mut params = HashMap::new();
+        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-vis-batch-invalid-rec".to_string());
+        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
+        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(), "invalid-receipt".to_string());
+        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(), "30".to_string());
+
+        let request = SqsRequest {
+            action: SqsAction::ChangeMessageVisibilityBatch,
+            params,
+            is_json: false,
+        };
+
+        let (response, _) = handler.handle_request(request).await;
+        assert!(response.contains("ChangeMessageVisibilityBatchResponse"));
+        assert!(response.contains("BatchResultErrorEntry"));
+        assert!(response.contains("ReceiptHandleIsInvalid"));
+    }
+
+    // ========================================================================
+    // JSON Response Format Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_delete_message_batch_json_response() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-del-batch-json").await;
+
+        // Send and receive messages
+        for i in 1..=2 {
+            let mut send_params = HashMap::new();
+            send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-del-batch-json".to_string());
+            send_params.insert("MessageBody".to_string(), format!("Message {}", i));
+            handler.handle_request(SqsRequest {
+                action: SqsAction::SendMessage,
+                params: send_params,
+                is_json: false,
+            }).await;
+        }
+
+        // Receive messages
+        let mut receive_params = HashMap::new();
+        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-del-batch-json".to_string());
+        receive_params.insert("MaxNumberOfMessages".to_string(), "10".to_string());
+
+        let (receive_response, _) = handler.handle_request(SqsRequest {
+            action: SqsAction::ReceiveMessage,
+            params: receive_params,
+            is_json: false,
+        }).await;
+
+        // Extract receipt handles
+        let receipt_handles: Vec<String> = receive_response
+            .match_indices("<ReceiptHandle>")
+            .take(2)
+            .map(|(start, _)| {
+                let content_start = start + 15;
+                let content_end = receive_response[content_start..].find("</ReceiptHandle>").unwrap() + content_start;
+                receive_response[content_start..content_end].to_string()
+            })
+            .collect();
+
+        if receipt_handles.len() >= 2 {
+            // Delete in batch with JSON response
+            let mut params = HashMap::new();
+            params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-del-batch-json".to_string());
+            params.insert("DeleteMessageBatchRequestEntry.1.Id".to_string(), "entry1".to_string());
+            params.insert("DeleteMessageBatchRequestEntry.1.ReceiptHandle".to_string(), receipt_handles[0].clone());
+            params.insert("DeleteMessageBatchRequestEntry.2.Id".to_string(), "entry2".to_string());
+            params.insert("DeleteMessageBatchRequestEntry.2.ReceiptHandle".to_string(), receipt_handles[1].clone());
+
+            let request = SqsRequest {
+                action: SqsAction::DeleteMessageBatch,
+                params,
+                is_json: true,
+            };
+
+            let (response, content_type) = handler.handle_request(request).await;
+            assert_eq!(content_type, "application/x-amz-json-1.0");
+            assert!(response.contains("Successful"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_change_visibility_batch_json_response() {
+        let handler = create_test_handler();
+        create_test_queue(&handler, "test-vis-batch-json").await;
+
+        // Send and receive messages
+        for i in 1..=2 {
+            let mut send_params = HashMap::new();
+            send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-vis-batch-json".to_string());
+            send_params.insert("MessageBody".to_string(), format!("Message {}", i));
+            handler.handle_request(SqsRequest {
+                action: SqsAction::SendMessage,
+                params: send_params,
+                is_json: false,
+            }).await;
+        }
+
+        // Receive messages
+        let mut receive_params = HashMap::new();
+        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-vis-batch-json".to_string());
+        receive_params.insert("MaxNumberOfMessages".to_string(), "10".to_string());
+
+        let (receive_response, _) = handler.handle_request(SqsRequest {
+            action: SqsAction::ReceiveMessage,
+            params: receive_params,
+            is_json: false,
+        }).await;
+
+        // Extract receipt handles
+        let receipt_handles: Vec<String> = receive_response
+            .match_indices("<ReceiptHandle>")
+            .take(2)
+            .map(|(start, _)| {
+                let content_start = start + 15;
+                let content_end = receive_response[content_start..].find("</ReceiptHandle>").unwrap() + content_start;
+                receive_response[content_start..content_end].to_string()
+            })
+            .collect();
+
+        if receipt_handles.len() >= 2 {
+            // Change visibility in batch with JSON response
+            let mut params = HashMap::new();
+            params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-vis-batch-json".to_string());
+            params.insert("ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(), "entry1".to_string());
+            params.insert("ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(), receipt_handles[0].clone());
+            params.insert("ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(), "30".to_string());
+            params.insert("ChangeMessageVisibilityBatchRequestEntry.2.Id".to_string(), "entry2".to_string());
+            params.insert("ChangeMessageVisibilityBatchRequestEntry.2.ReceiptHandle".to_string(), receipt_handles[1].clone());
+            params.insert("ChangeMessageVisibilityBatchRequestEntry.2.VisibilityTimeout".to_string(), "60".to_string());
+
+            let request = SqsRequest {
+                action: SqsAction::ChangeMessageVisibilityBatch,
+                params,
+                is_json: true,
+            };
+
+            let (response, content_type) = handler.handle_request(request).await;
+            assert_eq!(content_type, "application/x-amz-json-1.0");
+            assert!(response.contains("Successful"));
+        }
+    }
 }
+
+
 

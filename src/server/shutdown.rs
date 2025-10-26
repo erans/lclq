@@ -123,4 +123,73 @@ mod tests {
         assert!(rx1.recv().await.is_ok());
         assert!(rx2.recv().await.is_ok());
     }
+
+    #[tokio::test]
+    async fn test_shutdown_receiver() {
+        let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+
+        // Spawn a task that waits for shutdown
+        let handle = tokio::spawn(async move {
+            shutdown_receiver(shutdown_rx).await;
+        });
+
+        // Give the receiver time to start waiting
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        // Trigger shutdown
+        let _ = shutdown_tx.send(());
+
+        // The receiver task should complete
+        let result = tokio::time::timeout(
+            tokio::time::Duration::from_secs(1),
+            handle
+        ).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_signal_default() {
+        let signal = ShutdownSignal::default();
+        let mut rx = signal.subscribe();
+
+        signal.shutdown();
+        assert!(rx.recv().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_receiver_immediate() {
+        let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+
+        // Send signal before receiver starts
+        let _ = shutdown_tx.send(());
+
+        // Receiver should complete immediately
+        let handle = tokio::spawn(async move {
+            shutdown_receiver(shutdown_rx).await;
+        });
+
+        let result = tokio::time::timeout(
+            tokio::time::Duration::from_millis(100),
+            handle
+        ).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_signal_clone() {
+        let signal = ShutdownSignal::new();
+        let cloned = signal.clone();
+
+        let mut rx1 = signal.subscribe();
+        let mut rx2 = cloned.subscribe();
+
+        // Trigger shutdown from cloned signal
+        cloned.shutdown();
+
+        // Both should receive signal
+        assert!(rx1.recv().await.is_ok());
+        assert!(rx2.recv().await.is_ok());
+    }
 }

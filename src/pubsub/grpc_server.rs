@@ -68,6 +68,7 @@ pub async fn start_grpc_server(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::memory::InMemoryBackend;
 
     #[test]
     fn test_default_config() {
@@ -81,6 +82,108 @@ mod tests {
             bind_address: "0.0.0.0:9090".to_string(),
         };
         assert!(config.bind_address.parse::<std::net::SocketAddr>().is_ok());
+    }
+
+    #[test]
+    fn test_config_clone() {
+        let config = GrpcServerConfig::default();
+        let cloned = config.clone();
+        assert_eq!(config.bind_address, cloned.bind_address);
+    }
+
+    #[test]
+    fn test_custom_config() {
+        let config = GrpcServerConfig {
+            bind_address: "[::1]:8086".to_string(),
+        };
+        assert_eq!(config.bind_address, "[::1]:8086");
+    }
+
+    #[tokio::test]
+    async fn test_invalid_bind_address() {
+        let config = GrpcServerConfig {
+            bind_address: "invalid:address:format".to_string(),
+        };
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let (_shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+
+        let result = start_grpc_server(config, backend, shutdown_rx).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), crate::error::Error::Config(_)));
+    }
+
+    #[tokio::test]
+    async fn test_start_grpc_server() {
+        let config = GrpcServerConfig {
+            bind_address: "127.0.0.1:0".to_string(), // Port 0 = random available port
+        };
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+
+        // Start server in background
+        let server_handle = tokio::spawn(async move {
+            start_grpc_server(config, backend, shutdown_rx).await
+        });
+
+        // Give server time to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Trigger shutdown
+        let _ = shutdown_tx.send(());
+
+        // Wait for server to shutdown gracefully
+        let result = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            server_handle
+        ).await;
+
+        assert!(result.is_ok());
+        let server_result = result.unwrap().unwrap();
+        assert!(server_result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_grpc_server_with_shutdown_signal() {
+        use crate::server::shutdown::ShutdownSignal;
+
+        let config = GrpcServerConfig {
+            bind_address: "127.0.0.1:0".to_string(),
+        };
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let signal = ShutdownSignal::new();
+        let shutdown_rx = signal.subscribe();
+
+        // Start server
+        let server_handle = tokio::spawn(async move {
+            start_grpc_server(config, backend, shutdown_rx).await
+        });
+
+        // Give server time to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Trigger shutdown via signal
+        signal.shutdown();
+
+        // Wait for graceful shutdown
+        let result = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            server_handle
+        ).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_grpc_server_creates_services() {
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+
+        // Test that services can be created
+        let publisher = PublisherService::new(backend.clone());
+        let subscriber = SubscriberService::new(backend);
+
+        // Services should be created successfully (no panics)
+        drop(publisher);
+        drop(subscriber);
     }
 }
 

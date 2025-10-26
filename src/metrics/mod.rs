@@ -229,9 +229,118 @@ mod tests {
     }
 
     #[test]
+    fn test_metrics_default() {
+        let metrics = Metrics::default();
+        // Default should create a new Metrics instance
+        metrics
+            .messages_sent_total
+            .with_label_values(&["test-id", "test-queue", "sqs"])
+            .inc();
+    }
+
+    #[test]
     fn test_metrics_gather() {
         let metrics = get_metrics();
         let output = metrics.gather().expect("Failed to gather metrics");
         assert!(output.contains("lclq_"));
+    }
+
+    #[test]
+    fn test_global_metrics_lazy_initialization() {
+        // Access global metrics (triggers lazy initialization)
+        let metrics1 = get_metrics();
+        let metrics2 = get_metrics();
+
+        // Both should point to the same instance
+        assert!(Arc::ptr_eq(&metrics1, &metrics2));
+    }
+
+    #[test]
+    fn test_all_counter_metrics() {
+        let metrics = get_metrics();
+
+        // Test messages_sent_total (line 33)
+        metrics.messages_sent_total
+            .with_label_values(&["q1", "queue1", "sqs"])
+            .inc();
+
+        // Test messages_received_total (line 35)
+        metrics.messages_received_total
+            .with_label_values(&["q1", "queue1", "sqs"])
+            .inc();
+
+        // Test messages_deleted_total (line 37)
+        metrics.messages_deleted_total
+            .with_label_values(&["q1", "queue1"])
+            .inc();
+
+        // Test messages_to_dlq_total (line 39)
+        metrics.messages_to_dlq_total
+            .with_label_values(&["q1", "queue1"])
+            .inc();
+
+        // Test backend_errors_total (line 41)
+        metrics.backend_errors_total
+            .with_label_values(&["memory", "send"])
+            .inc();
+
+        // Test api_requests_total (line 43)
+        metrics.api_requests_total
+            .with_label_values(&["sqs", "POST", "/", "200"])
+            .inc();
+    }
+
+    #[test]
+    fn test_all_histogram_metrics() {
+        let metrics = get_metrics();
+
+        // Test send_latency_seconds (line 46)
+        metrics.send_latency_seconds
+            .with_label_values(&["memory"])
+            .observe(0.05);
+
+        // Test receive_latency_seconds (line 48)
+        metrics.receive_latency_seconds
+            .with_label_values(&["memory"])
+            .observe(0.02);
+
+        // Test api_latency_seconds (line 50)
+        metrics.api_latency_seconds
+            .with_label_values(&["sqs", "/send"])
+            .observe(0.01);
+    }
+
+    #[test]
+    fn test_all_gauge_metrics() {
+        let metrics = get_metrics();
+
+        // Test queue_depth (line 53)
+        metrics.queue_depth
+            .with_label_values(&["q1", "queue1"])
+            .set(100);
+
+        // Test in_flight_messages (line 55)
+        metrics.in_flight_messages
+            .with_label_values(&["q1", "queue1"])
+            .set(10);
+
+        // Test queue_count (line 57)
+        metrics.queue_count.set(5);
+
+        // Test active_connections (line 59)
+        metrics.active_connections
+            .with_label_values(&["sqs"])
+            .set(3);
+    }
+
+    #[test]
+    fn test_metrics_registry_access() {
+        // Test that METRICS_REGISTRY is accessible via gather (line 199)
+        let metrics = get_metrics();
+        let output = metrics.gather().expect("Failed to gather metrics");
+
+        // Verify registry contains our metrics
+        assert!(output.contains("lclq_"));
+        assert!(output.contains("messages_sent_total") || output.contains("queue_depth"));
     }
 }

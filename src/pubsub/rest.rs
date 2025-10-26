@@ -2103,4 +2103,257 @@ mod tests {
         let pubsub_msg = RestState::message_to_pubsub_message(&msg);
         assert_eq!(pubsub_msg.data, b"test");
     }
+
+    #[tokio::test]
+    async fn test_create_subscription_with_dead_letter_policy() {
+        let app = create_test_app();
+
+        // First create a topic
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test/topics/test-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        // Create subscription with dead letter policy
+        let body = serde_json::json!({
+            "topic": "projects/test/topics/test-topic",
+            "deadLetterPolicy": {
+                "deadLetterTopic": "projects/test/topics/dlq-topic",
+                "maxDeliveryAttempts": 5
+            }
+        });
+
+        let (status, response) = send_request(
+            app,
+            Method::PUT,
+            "/v1/projects/test/subscriptions/test-sub",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["deadLetterPolicy"]["deadLetterTopic"], "projects/test/topics/dlq-topic");
+        assert_eq!(response["deadLetterPolicy"]["maxDeliveryAttempts"], 5);
+    }
+
+    #[tokio::test]
+    async fn test_subscription_with_non_standard_id_format() {
+        // This should use fallback logic for parsing (lines 140, 148)
+        let config = crate::types::SubscriptionConfig {
+            id: "simple-sub".to_string(), // No project prefix
+            name: "simple-sub".to_string(),
+            topic_id: "simple-topic".to_string(), // No project prefix
+            ack_deadline_seconds: 10,
+            message_retention_duration: 86400,
+            enable_message_ordering: false,
+            filter: None,
+            dead_letter_policy: None,
+        };
+
+        let converted = RestState::config_to_subscription(&config);
+        assert_eq!(converted.topic, "projects/default/topics/simple-topic");
+    }
+
+    #[tokio::test]
+    async fn test_publish_message_with_string_attributes() {
+        use crate::types::{Message, MessageId, MessageAttributeValue};
+        use chrono::Utc;
+        use std::collections::HashMap;
+
+        let mut attributes = HashMap::new();
+        attributes.insert(
+            "attr1".to_string(),
+            MessageAttributeValue {
+                data_type: "String".to_string(),
+                string_value: Some("value1".to_string()),
+                binary_value: None,
+            },
+        );
+        attributes.insert(
+            "attr2".to_string(),
+            MessageAttributeValue {
+                data_type: "String".to_string(),
+                string_value: Some("value2".to_string()),
+                binary_value: None,
+            },
+        );
+
+        let msg = Message {
+            id: MessageId::new(),
+            body: general_purpose::STANDARD.encode(b"test"),
+            attributes,
+            queue_id: "test:topic".to_string(),
+            sent_timestamp: Utc::now(),
+            receive_count: 0,
+            message_group_id: None,
+            deduplication_id: None,
+            sequence_number: None,
+            delay_seconds: None,
+        };
+
+        // This should extract string attributes (lines 221-222)
+        let pubsub_msg = RestState::message_to_pubsub_message(&msg);
+        assert_eq!(pubsub_msg.data, b"test");
+        assert!(pubsub_msg.attributes.is_some());
+        let attrs = pubsub_msg.attributes.unwrap();
+        assert_eq!(attrs.get("attr1").unwrap(), "value1");
+        assert_eq!(attrs.get("attr2").unwrap(), "value2");
+    }
+
+    #[test]
+    fn test_error_response_status_codes() {
+        // Test INTERNAL_SERVER_ERROR (line 260)
+        let err = ErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal error");
+        assert_eq!(err.error.status, "INTERNAL");
+        assert_eq!(err.error.code, 500);
+
+        // Test UNPROCESSABLE_ENTITY (line 261)
+        let err = ErrorResponse::new(StatusCode::UNPROCESSABLE_ENTITY, "Unprocessable");
+        assert_eq!(err.error.status, "FAILED_PRECONDITION");
+        assert_eq!(err.error.code, 422);
+
+        // Test default case (line 262)
+        let err = ErrorResponse::new(StatusCode::IM_A_TEAPOT, "I'm a teapot");
+        assert_eq!(err.error.status, "UNKNOWN");
+        assert_eq!(err.error.code, 418);
+    }
+
+    #[test]
+    fn test_pubsub_message_invalid_base64() {
+        // Test deserialization with invalid base64 (line 369)
+        let json = serde_json::json!({
+            "data": "invalid-base64-!!!" // Invalid base64 characters
+        });
+
+        let result: std::result::Result<PubsubMessage, _> = serde_json::from_value(json);
+        assert!(result.is_err()); // Should fail to deserialize
+    }
+
+    #[tokio::test]
+    async fn test_start_rest_server_lifecycle() {
+        use tokio::sync::broadcast;
+
+        let config = RestServerConfig {
+            bind_address: "127.0.0.1:0".to_string(), // Port 0 = random available port
+        };
+        let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
+        let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+
+        // Start server in background
+        let server_handle = tokio::spawn(async move {
+            start_rest_server(config, backend, shutdown_rx).await
+        });
+
+        // Give server time to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Trigger shutdown
+        let _ = shutdown_tx.send(());
+
+        // Wait for graceful shutdown
+        let result = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            server_handle
+        ).await;
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_unknown_topic_action() {
+        let app = create_test_app();
+
+        // Create a topic first
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test/topics/test-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        // Try unknown action (line 605-607)
+        let (status, response) = send_request(
+            app,
+            Method::POST,
+            "/v1/projects/test/topics/test-topic:unknownAction",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(response["error"]["message"].as_str().unwrap().contains("Unknown topic action"));
+    }
+
+    #[tokio::test]
+    async fn test_invalid_topic_action_format() {
+        let app = create_test_app();
+
+        // No colon separator (line 611)
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/projects/test/topics/no-action-separator")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&serde_json::json!({})).unwrap()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_unknown_subscription_action() {
+        let app = create_test_app();
+
+        // Create topic and subscription first
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test/topics/test-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test/subscriptions/test-sub",
+            Some(serde_json::json!({
+                "topic": "projects/test/topics/test-topic"
+            })),
+        )
+        .await;
+
+        // Try unknown action (line 913-915)
+        let (status, response) = send_request(
+            app,
+            Method::POST,
+            "/v1/projects/test/subscriptions/test-sub:unknownAction",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(response["error"]["message"].as_str().unwrap().contains("Unknown subscription action"));
+    }
+
+    #[tokio::test]
+    async fn test_invalid_subscription_action_format() {
+        let app = create_test_app();
+
+        // No colon separator (line 919)
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/projects/test/subscriptions/no-action-separator")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&serde_json::json!({})).unwrap()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
 }

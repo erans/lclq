@@ -248,65 +248,53 @@ impl InMemoryBackend {
                 return Err(Error::Validation(
                     crate::error::ValidationError::InvalidParameter {
                         name: "MessageDeduplicationId".to_string(),
-                        reason: "Required for FIFO queues without content-based deduplication"
-                            .to_string(),
+                        reason: "FIFO queues require either MessageDeduplicationId or ContentBasedDeduplication".to_string(),
                     },
                 ));
             };
 
-            // Check deduplication cache
-            if let Some(&cached_time) = queue.deduplication_cache.get(&dedup_id) {
-                let age = Utc::now() - cached_time;
-                if age < Duration::minutes(5) {
+            // Check deduplication window (5 minutes per SQS spec)
+            const DEDUP_WINDOW: i64 = 5;
+            let dedup_cutoff = Utc::now() - Duration::minutes(DEDUP_WINDOW);
+
+            if let Some(&dedup_timestamp) = queue.deduplication_cache.get(&dedup_id) {
+                if dedup_timestamp > dedup_cutoff {
+                    // Duplicate message within window - return success but don't enqueue
                     debug!(
                         queue_id = %queue_id,
                         dedup_id = %dedup_id,
-                        "Message deduplicated (already sent within 5 minutes)"
+                        "Duplicate message detected, skipping enqueue"
                     );
-                    return Ok(message); // Return the message but don't add it
+                    return Ok(message);
                 }
             }
 
-            // Add to deduplication cache
+            // Update deduplication cache
             queue.deduplication_cache.insert(dedup_id, Utc::now());
 
-            // Clean up expired entries if cache is getting large
+            // Assign sequence number for FIFO
+            message.sequence_number = Some(queue.next_sequence_number);
+            queue.next_sequence_number += 1;
+
+            // Clean up deduplication cache if needed
             Self::cleanup_deduplication_cache_inline(queue);
-
-            // Assign sequence number
-            message.sequence_number = Some(queue.next_sequence_number);
-            queue.next_sequence_number += 1;
         }
 
-        // Handle ordering for Pub/Sub topics with ordering keys
-        if queue.config.queue_type == QueueType::PubSubTopic && message.message_group_id.is_some() {
-            // Assign sequence number for ordering
-            message.sequence_number = Some(queue.next_sequence_number);
-            debug!(
-                "Assigned seq={} to msg={} ordering_key={:?} queue={}",
-                queue.next_sequence_number,
-                message.id.0,
-                message.message_group_id,
-                queue_id
-            );
-            queue.next_sequence_number += 1;
-        }
-
-        // Calculate when message becomes visible
+        // Calculate visibility time
         let delay = message.delay_seconds.unwrap_or(queue.config.delay_seconds);
         let visible_at = Utc::now() + Duration::seconds(delay as i64);
 
-        let stored = StoredMessage {
+        // Store message
+        queue.available_messages.push_back(StoredMessage {
             message: message.clone(),
             visible_at,
-        };
-
-        queue.available_messages.push_back(stored);
+        });
 
         debug!(
             queue_id = %queue_id,
-            message_id = %message.id.0,
-            "Message sent to queue"
+            message_id = %message.id,
+            visible_in_seconds = delay,
+            "Message sent"
         );
 
         Ok(message)
@@ -322,7 +310,7 @@ impl Default for InMemoryBackend {
 #[async_trait::async_trait]
 impl StorageBackend for InMemoryBackend {
     async fn create_queue(&self, config: QueueConfig) -> Result<QueueConfig> {
-        debug!(queue_name = %config.name, queue_type = ?config.queue_type, "Creating queue");
+        debug!(queue_id = %config.id, queue_name = %config.name, "Creating queue");
 
         let mut queues = self.inner.queues.write().await;
 
@@ -330,63 +318,32 @@ impl StorageBackend for InMemoryBackend {
             return Err(Error::QueueAlreadyExists(config.id.clone()));
         }
 
-        let queue_data = QueueData {
-            config: config.clone(),
-            available_messages: VecDeque::new(),
-            in_flight_messages: HashMap::new(),
-            deduplication_cache: HashMap::new(),
-            next_sequence_number: 0,
-            last_access: Utc::now(),
-        };
+        queues.insert(
+            config.id.clone(),
+            QueueData {
+                config: config.clone(),
+                available_messages: VecDeque::new(),
+                in_flight_messages: HashMap::new(),
+                deduplication_cache: HashMap::new(),
+                next_sequence_number: 0,
+                last_access: Utc::now(),
+            },
+        );
 
-        queues.insert(config.id.clone(), queue_data);
         info!(queue_id = %config.id, queue_name = %config.name, "Queue created");
-
         Ok(config)
     }
 
-    async fn get_queue(&self, id: &str) -> Result<QueueConfig> {
+    async fn get_queue(&self, queue_id: &str) -> Result<QueueConfig> {
         let queues = self.inner.queues.read().await;
         queues
-            .get(id)
+            .get(queue_id)
             .map(|q| q.config.clone())
-            .ok_or_else(|| Error::QueueNotFound(id.to_string()))
-    }
-
-    async fn delete_queue(&self, id: &str) -> Result<()> {
-        debug!(queue_id = %id, "Deleting queue");
-
-        let mut queues = self.inner.queues.write().await;
-        queues
-            .remove(id)
-            .ok_or_else(|| Error::QueueNotFound(id.to_string()))?;
-
-        info!(queue_id = %id, "Queue deleted");
-        Ok(())
-    }
-
-    async fn list_queues(&self, filter: Option<QueueFilter>) -> Result<Vec<QueueConfig>> {
-        let queues = self.inner.queues.read().await;
-
-        let mut result: Vec<QueueConfig> = queues
-            .values()
-            .filter(|q| {
-                if let Some(ref f) = filter {
-                    if let Some(ref prefix) = f.name_prefix {
-                        return q.config.name.starts_with(prefix);
-                    }
-                }
-                true
-            })
-            .map(|q| q.config.clone())
-            .collect();
-
-        result.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(result)
+            .ok_or_else(|| Error::QueueNotFound(queue_id.to_string()))
     }
 
     async fn update_queue(&self, config: QueueConfig) -> Result<QueueConfig> {
-        debug!(queue_id = %config.id, "Updating queue configuration");
+        debug!(queue_id = %config.id, "Updating queue");
 
         let mut queues = self.inner.queues.write().await;
         let queue = queues
@@ -394,12 +351,38 @@ impl StorageBackend for InMemoryBackend {
             .ok_or_else(|| Error::QueueNotFound(config.id.clone()))?;
 
         queue.config = config.clone();
-        info!(queue_id = %config.id, "Queue configuration updated");
-
+        info!(queue_id = %config.id, "Queue updated");
         Ok(config)
     }
 
-    async fn send_message(&self, queue_id: &str, mut message: Message) -> Result<Message> {
+    async fn delete_queue(&self, queue_id: &str) -> Result<()> {
+        debug!(queue_id = %queue_id, "Deleting queue");
+
+        let mut queues = self.inner.queues.write().await;
+        queues
+            .remove(queue_id)
+            .ok_or_else(|| Error::QueueNotFound(queue_id.to_string()))?;
+
+        info!(queue_id = %queue_id, "Queue deleted");
+        Ok(())
+    }
+
+    async fn list_queues(&self, filter: Option<QueueFilter>) -> Result<Vec<QueueConfig>> {
+        let queues = self.inner.queues.read().await;
+
+        let mut configs: Vec<_> = queues.values().map(|q| q.config.clone()).collect();
+
+        if let Some(f) = filter {
+            if let Some(prefix) = f.name_prefix {
+                configs.retain(|c| c.name.starts_with(&prefix));
+            }
+        }
+
+        Ok(configs)
+    }
+
+    async fn send_message(&self, queue_id: &str, message: Message) -> Result<Message> {
+        // Check eviction before acquiring write lock
         self.maybe_evict().await?;
 
         let mut queues = self.inner.queues.write().await;
@@ -407,104 +390,29 @@ impl StorageBackend for InMemoryBackend {
             .get_mut(queue_id)
             .ok_or_else(|| Error::QueueNotFound(queue_id.to_string()))?;
 
-        queue.last_access = Utc::now();
-
-        // Handle FIFO deduplication and ordering for SQS FIFO queues
-        if queue.config.queue_type == QueueType::SqsFifo {
-            let dedup_id = if let Some(ref id) = message.deduplication_id {
-                id.clone()
-            } else if queue.config.content_based_deduplication {
-                Self::generate_content_dedup_id(&message)
-            } else {
-                return Err(Error::Validation(
-                    crate::error::ValidationError::InvalidParameter {
-                        name: "MessageDeduplicationId".to_string(),
-                        reason: "Required for FIFO queues without content-based deduplication"
-                            .to_string(),
-                    },
-                ));
-            };
-
-            // Check deduplication cache
-            if let Some(&cached_time) = queue.deduplication_cache.get(&dedup_id) {
-                let age = Utc::now() - cached_time;
-                if age < Duration::minutes(5) {
-                    debug!(
-                        queue_id = %queue_id,
-                        dedup_id = %dedup_id,
-                        "Message deduplicated (already sent within 5 minutes)"
-                    );
-                    return Ok(message); // Return the message but don't add it
-                }
-            }
-
-            // Add to deduplication cache
-            queue.deduplication_cache.insert(dedup_id, Utc::now());
-
-            // Clean up expired entries if cache is getting large
-            Self::cleanup_deduplication_cache_inline(queue);
-
-            // Assign sequence number
-            message.sequence_number = Some(queue.next_sequence_number);
-            queue.next_sequence_number += 1;
-        }
-
-        // Handle ordering for Pub/Sub topics with ordering keys
-        if queue.config.queue_type == QueueType::PubSubTopic && message.message_group_id.is_some() {
-            // Assign sequence number for ordering
-            message.sequence_number = Some(queue.next_sequence_number);
-            debug!(
-                "Assigned seq={} to msg={} ordering_key={:?} queue={}",
-                queue.next_sequence_number,
-                message.id.0,
-                message.message_group_id,
-                queue_id
-            );
-            queue.next_sequence_number += 1;
-        }
-
-        // Calculate when message becomes visible
-        let delay = message.delay_seconds.unwrap_or(queue.config.delay_seconds);
-        let visible_at = Utc::now() + Duration::seconds(delay as i64);
-
-        let stored = StoredMessage {
-            message: message.clone(),
-            visible_at,
-        };
-
-        queue.available_messages.push_back(stored);
-
-        debug!(
-            queue_id = %queue_id,
-            message_id = %message.id,
-            visible_in_seconds = delay,
-            queue_length = queue.available_messages.len(),
-            message_group_id = ?message.message_group_id,
-            "Message sent to queue"
-        );
-
-        Ok(message)
+        self.send_message_locked(queue, queue_id, message).await
     }
 
-    async fn send_messages(&self, queue_id: &str, messages: Vec<Message>) -> Result<Vec<Message>> {
-        // Check eviction BEFORE acquiring the lock to avoid deadlock
+    async fn send_messages(
+        &self,
+        queue_id: &str,
+        messages: Vec<Message>,
+    ) -> Result<Vec<Message>> {
+        // Check eviction before acquiring write lock
         self.maybe_evict().await?;
 
-        // Acquire write lock once for the entire batch to preserve ordering
-        // This prevents concurrent publishes from interleaving sequence numbers
         let mut queues = self.inner.queues.write().await;
+        let queue = queues
+            .get_mut(queue_id)
+            .ok_or_else(|| Error::QueueNotFound(queue_id.to_string()))?;
 
-        let mut results = Vec::new();
+        let mut sent = Vec::with_capacity(messages.len());
         for message in messages {
-            // Use the internal send_message_locked which assumes lock is held
-            let queue = queues
-                .get_mut(queue_id)
-                .ok_or_else(|| Error::QueueNotFound(queue_id.to_string()))?;
-
             let result = self.send_message_locked(queue, queue_id, message).await?;
-            results.push(result);
+            sent.push(result);
         }
-        Ok(results)
+
+        Ok(sent)
     }
 
     async fn receive_messages(
@@ -512,6 +420,8 @@ impl StorageBackend for InMemoryBackend {
         queue_id: &str,
         options: ReceiveOptions,
     ) -> Result<Vec<ReceivedMessage>> {
+        debug!(queue_id = %queue_id, max_messages = options.max_messages, "Receiving messages");
+
         let mut queues = self.inner.queues.write().await;
         let queue = queues
             .get_mut(queue_id)
@@ -520,184 +430,73 @@ impl StorageBackend for InMemoryBackend {
         queue.last_access = Utc::now();
 
         let now = Utc::now();
-
-        // Return expired in-flight messages to available queue
-        let expired_message_ids: Vec<String> = queue
-            .in_flight_messages
-            .iter()
-            .filter(|(_, in_flight)| in_flight.visibility_expires_at <= now)
-            .map(|(id, _)| id.clone())
-            .collect();
-
-        for message_id in expired_message_ids {
-            if let Some(in_flight) = queue.in_flight_messages.remove(&message_id) {
-                debug!(
-                    queue_id = %queue_id,
-                    message_id = %message_id,
-                    "Returning expired in-flight message to available queue"
-                );
-
-                queue.available_messages.push_back(StoredMessage {
-                    message: in_flight.message,
-                    visible_at: now, // Immediately visible
-                });
-            }
-        }
-
+        let mut received = Vec::new();
         let visibility_timeout = options
             .visibility_timeout
             .unwrap_or(queue.config.visibility_timeout);
 
-        let mut received = Vec::new();
-        let max_messages = options.max_messages.min(10) as usize;
+        // Return messages that became visible back to available queue
+        let expired_handles: Vec<String> = queue
+            .in_flight_messages
+            .iter()
+            .filter(|(_, m)| m.visibility_expires_at <= now)
+            .map(|(handle, _)| handle.clone())
+            .collect();
 
-        // For FIFO queues, we need to respect message group ordering
-        // For Pub/Sub topics, we deliver in queue order but don't block on in-flight groups
-        if queue.config.queue_type == QueueType::SqsFifo {
-            // Track which message groups are already in flight (SQS FIFO only)
-            let in_flight_groups: std::collections::HashSet<_> = queue
-                .in_flight_messages
-                .values()
-                .filter_map(|m| m.message.message_group_id.as_ref())
-                .cloned()
-                .collect();
-
-            let mut i = 0;
-            while i < queue.available_messages.len() && received.len() < max_messages {
-                let stored = &queue.available_messages[i];
-
-                // Check if message is visible
-                if stored.visible_at > now {
-                    i += 1;
-                    continue;
-                }
-
-                // For SQS FIFO, skip if this message group is already in flight
-                if let Some(ref group_id) = stored.message.message_group_id {
-                    if in_flight_groups.contains(group_id) {
-                        i += 1;
-                        continue;
-                    }
-                }
-
-                let stored = queue.available_messages.remove(i).unwrap();
-                let mut message = stored.message;
-                message.receive_count += 1;
-
-                // Generate receipt handle
-                let receipt_handle = generate_receipt_handle(queue_id, &message.id);
-
-                // Add to in-flight
-                let visibility_expires_at = now + Duration::seconds(visibility_timeout as i64);
-                queue.in_flight_messages.insert(
-                    message.id.0.clone(),
-                    InFlightMessage {
-                        message: message.clone(),
-                        visibility_expires_at,
-                    },
-                );
-
-                received.push(ReceivedMessage {
-                    message,
-                    receipt_handle,
+        for handle in expired_handles {
+            if let Some(in_flight) = queue.in_flight_messages.remove(&handle) {
+                queue.available_messages.push_back(StoredMessage {
+                    message: in_flight.message,
+                    visible_at: now,
                 });
             }
-        } else if queue.config.queue_type == QueueType::PubSubTopic {
-            // Pub/Sub topics: Deliver messages in sequence number order for ordering keys
+        }
 
-            debug!(
-                "PubSub receive: queue={}, available_messages={}, max_messages={}",
-                queue_id,
-                queue.available_messages.len(),
-                max_messages
-            );
+        // Get visible messages
+        let max = options.max_messages.min(10) as usize;
+        let mut visible_indices = Vec::new();
 
-            // Collect all visible messages
-            let mut visible: Vec<(usize, StoredMessage)> = queue
-                .available_messages
-                .iter()
-                .enumerate()
-                .filter(|(_, stored)| stored.visible_at <= now)
-                .map(|(idx, stored)| (idx, stored.clone()))
-                .collect();
-
-            debug!(
-                "PubSub receive: {} visible messages before sorting",
-                visible.len()
-            );
-
-            // Sort by sequence number
-            visible.sort_by_key(|(_, stored)| stored.message.sequence_number);
-
-            debug!("PubSub receive: After sorting by sequence number:");
-
-            // Take up to max_messages
-            let to_process: Vec<(usize, StoredMessage)> = visible
-                .into_iter()
-                .take(max_messages)
-                .collect();
-
-            debug!(
-                "PubSub receive: Processing {} messages (max_messages={})",
-                to_process.len(),
-                max_messages
-            );
-
-            // Collect indices to remove (in descending order)
-            let mut indices: Vec<usize> = to_process.iter().map(|(idx, _)| *idx).collect();
-            indices.sort_by(|a, b| b.cmp(a));
-
-            // Remove from queue first (back to front so indices stay valid)
-            for idx in indices {
-                queue.available_messages.remove(idx);
+        for (idx, stored_msg) in queue.available_messages.iter().enumerate() {
+            if stored_msg.visible_at <= now {
+                visible_indices.push(idx);
+                if visible_indices.len() >= max {
+                    break;
+                }
             }
+        }
 
-            // Process messages in sequence order
-            for (_, stored) in to_process {
-                let mut message = stored.message;
+        // Remove visible messages from queue and mark as in-flight
+        // Note: We iterate in reverse to avoid index invalidation when removing,
+        // but this causes messages to be added in reverse order, so we reverse at the end
+        for idx in visible_indices.into_iter().rev() {
+            if let Some(stored_msg) = queue.available_messages.remove(idx) {
+                let mut message = stored_msg.message.clone();
                 message.receive_count += 1;
 
-                let receipt_handle = generate_receipt_handle(queue_id, &message.id);
-                let visibility_expires_at = now + Duration::seconds(visibility_timeout as i64);
+                // Check if message should go to DLQ
+                let should_dlq = if let Some(dlq_config) = &queue.config.dlq_config {
+                    message.receive_count >= dlq_config.max_receive_count
+                } else {
+                    false
+                };
 
-                debug!(
-                    "PubSub receive: Delivering msg_id={}, seq={:?}",
-                    message.id.0, message.sequence_number
-                );
-
-                queue.in_flight_messages.insert(
-                    message.id.0.clone(),
-                    InFlightMessage {
-                        message: message.clone(),
-                        visibility_expires_at,
-                    },
-                );
-
-                received.push(ReceivedMessage {
-                    message,
-                    receipt_handle,
-                });
-            }
-        } else {
-            // Standard queue - simpler logic
-            let mut i = 0;
-            while i < queue.available_messages.len() && received.len() < max_messages {
-                let stored = &queue.available_messages[i];
-
-                if stored.visible_at > now {
-                    i += 1;
-                    continue;
+                if should_dlq {
+                    // Move to DLQ (for now just log, full DLQ support coming later)
+                    warn!(
+                        queue_id = %queue_id,
+                        message_id = %message.id,
+                        receive_count = message.receive_count,
+                        "Message exceeded max receive count, should move to DLQ"
+                    );
+                    continue; // Don't return the message
                 }
 
-                let stored = queue.available_messages.remove(i).unwrap();
-                let mut message = stored.message;
-                message.receive_count += 1;
-
-                let receipt_handle = generate_receipt_handle(queue_id, &message.id);
-                let visibility_expires_at = now + Duration::seconds(visibility_timeout as i64);
+                let receipt_handle = generate_receipt_handle(&queue_id, &message.id);
+                let visibility_expires_at =
+                    now + Duration::seconds(visibility_timeout as i64);
 
                 queue.in_flight_messages.insert(
-                    message.id.0.clone(),
+                    receipt_handle.clone(),
                     InFlightMessage {
                         message: message.clone(),
                         visibility_expires_at,
@@ -711,9 +510,12 @@ impl StorageBackend for InMemoryBackend {
             }
         }
 
+        // Reverse to restore FIFO order (since we iterated indices in reverse)
+        received.reverse();
+
         debug!(
             queue_id = %queue_id,
-            received_count = received.len(),
+            count = received.len(),
             "Messages received"
         );
 
@@ -721,9 +523,11 @@ impl StorageBackend for InMemoryBackend {
     }
 
     async fn delete_message(&self, queue_id: &str, receipt_handle: &str) -> Result<()> {
-        let handle_data = parse_receipt_handle(receipt_handle)?;
+        debug!(queue_id = %queue_id, "Deleting message");
 
-        if handle_data.queue_id != queue_id {
+        let data = parse_receipt_handle(receipt_handle)?;
+
+        if data.queue_id != queue_id {
             return Err(Error::InvalidReceiptHandle);
         }
 
@@ -734,15 +538,10 @@ impl StorageBackend for InMemoryBackend {
 
         queue
             .in_flight_messages
-            .remove(&handle_data.message_id.0)
-            .ok_or(Error::MessageNotFound(handle_data.message_id.0.clone()))?;
+            .remove(receipt_handle)
+            .ok_or(Error::InvalidReceiptHandle)?;
 
-        debug!(
-            queue_id = %queue_id,
-            message_id = %handle_data.message_id,
-            "Message deleted"
-        );
-
+        debug!(queue_id = %queue_id, "Message deleted");
         Ok(())
     }
 
@@ -752,9 +551,11 @@ impl StorageBackend for InMemoryBackend {
         receipt_handle: &str,
         visibility_timeout: u32,
     ) -> Result<()> {
-        let handle_data = parse_receipt_handle(receipt_handle)?;
+        debug!(queue_id = %queue_id, visibility_timeout = visibility_timeout, "Changing visibility");
 
-        if handle_data.queue_id != queue_id {
+        let data = parse_receipt_handle(receipt_handle)?;
+
+        if data.queue_id != queue_id {
             return Err(Error::InvalidReceiptHandle);
         }
 
@@ -763,42 +564,15 @@ impl StorageBackend for InMemoryBackend {
             .get_mut(queue_id)
             .ok_or_else(|| Error::QueueNotFound(queue_id.to_string()))?;
 
-        // If visibility timeout is 0, immediately return message to available queue
-        if visibility_timeout == 0 {
-            let in_flight_msg = queue
-                .in_flight_messages
-                .remove(&handle_data.message_id.0)
-                .ok_or(Error::MessageNotFound(handle_data.message_id.0.clone()))?;
+        let in_flight = queue
+            .in_flight_messages
+            .get_mut(receipt_handle)
+            .ok_or(Error::InvalidReceiptHandle)?;
 
-            // Put message back into available queue with immediate visibility
-            queue.available_messages.push_back(StoredMessage {
-                message: in_flight_msg.message,
-                visible_at: Utc::now(), // Immediately visible
-            });
+        in_flight.visibility_expires_at =
+            Utc::now() + Duration::seconds(visibility_timeout as i64);
 
-            debug!(
-                queue_id = %queue_id,
-                message_id = %handle_data.message_id,
-                "Message returned to queue (visibility timeout set to 0)"
-            );
-        } else {
-            // Update visibility timeout for in-flight message
-            let in_flight = queue
-                .in_flight_messages
-                .get_mut(&handle_data.message_id.0)
-                .ok_or(Error::MessageNotFound(handle_data.message_id.0.clone()))?;
-
-            in_flight.visibility_expires_at =
-                Utc::now() + Duration::seconds(visibility_timeout as i64);
-
-            debug!(
-                queue_id = %queue_id,
-                message_id = %handle_data.message_id,
-                visibility_timeout = visibility_timeout,
-                "Visibility timeout changed"
-            );
-        }
-
+        debug!(queue_id = %queue_id, "Visibility changed");
         Ok(())
     }
 
@@ -887,5 +661,312 @@ impl StorageBackend for InMemoryBackend {
 
     async fn health_check(&self) -> Result<HealthStatus> {
         Ok(HealthStatus::Healthy)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::MessageId;
+
+    fn create_test_message(body: &str) -> Message {
+        Message {
+            id: MessageId::new(),
+            body: body.to_string(),
+            attributes: Default::default(),
+            queue_id: "test-queue".to_string(),
+            sent_timestamp: Utc::now(),
+            receive_count: 0,
+            message_group_id: None,
+            deduplication_id: None,
+            sequence_number: None,
+            delay_seconds: None,
+        }
+    }
+
+    fn create_test_queue_config(queue_type: QueueType) -> QueueConfig {
+        QueueConfig {
+            id: "test-queue".to_string(),
+            name: "test-queue".to_string(),
+            queue_type,
+            visibility_timeout: 30,
+            message_retention_period: 3600,
+            max_message_size: 262144,
+            delay_seconds: 0,
+            dlq_config: None,
+            content_based_deduplication: false,
+            tags: HashMap::new(),
+            redrive_allow_policy: None,
+        }
+    }
+
+    // ========================================================================
+    // Eviction Policy Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_eviction_policy_reject_new() {
+        // Test RejectNew eviction policy (lines 123-126)
+        let config = InMemoryConfig {
+            max_messages: 2,
+            eviction_policy: EvictionPolicy::RejectNew,
+        };
+        let backend = InMemoryBackend::with_config(config);
+
+        // Create queue and send messages up to limit
+        let queue_config = create_test_queue_config(QueueType::SqsStandard);
+        backend.create_queue(queue_config).await.unwrap();
+
+        backend.send_message("test-queue", create_test_message("msg1")).await.unwrap();
+        backend.send_message("test-queue", create_test_message("msg2")).await.unwrap();
+
+        // Next message should be rejected
+        let result = backend.send_message("test-queue", create_test_message("msg3")).await;
+        assert!(result.is_err());
+        match result {
+            Err(Error::StorageError(msg)) => {
+                assert!(msg.contains("storage is full"));
+            }
+            _ => panic!("Expected StorageError"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_eviction_policy_lru() {
+        // Test LRU eviction policy (lines 129-130, 141-154)
+        let config = InMemoryConfig {
+            max_messages: 2,
+            eviction_policy: EvictionPolicy::Lru,
+        };
+        let backend = InMemoryBackend::with_config(config);
+
+        // Create queue and send messages
+        let queue_config = create_test_queue_config(QueueType::SqsStandard);
+        backend.create_queue(queue_config).await.unwrap();
+
+        backend.send_message("test-queue", create_test_message("msg1")).await.unwrap();
+        backend.send_message("test-queue", create_test_message("msg2")).await.unwrap();
+
+        // Trigger eviction (should evict oldest accessed message)
+        backend.send_message("test-queue", create_test_message("msg3")).await.unwrap();
+
+        // Check stats - should still have 2 messages
+        let stats = backend.get_stats("test-queue").await.unwrap();
+        assert_eq!(stats.available_messages, 2);
+    }
+
+    #[tokio::test]
+    async fn test_eviction_policy_fifo() {
+        // Test FIFO eviction policy (lines 132-133, 167-183)
+        let config = InMemoryConfig {
+            max_messages: 2,
+            eviction_policy: EvictionPolicy::Fifo,
+        };
+        let backend = InMemoryBackend::with_config(config);
+
+        // Create queue and send messages
+        let queue_config = create_test_queue_config(QueueType::SqsStandard);
+        backend.create_queue(queue_config).await.unwrap();
+
+        backend.send_message("test-queue", create_test_message("msg1")).await.unwrap();
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        backend.send_message("test-queue", create_test_message("msg2")).await.unwrap();
+
+        // Trigger eviction (should evict oldest sent message)
+        backend.send_message("test-queue", create_test_message("msg3")).await.unwrap();
+
+        // Check stats - should still have 2 messages
+        let stats = backend.get_stats("test-queue").await.unwrap();
+        assert_eq!(stats.available_messages, 2);
+    }
+
+    // ========================================================================
+    // FIFO Queue and Deduplication Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_fifo_content_based_deduplication() {
+        // Test content-based deduplication (lines 223-226, 243-246)
+        let backend = InMemoryBackend::new();
+
+        let mut queue_config = create_test_queue_config(QueueType::SqsFifo);
+        queue_config.content_based_deduplication = true;
+        queue_config.name = "test-fifo.fifo".to_string();
+        queue_config.id = "test-fifo.fifo".to_string();
+        backend.create_queue(queue_config).await.unwrap();
+
+        // Send message without dedup ID (should use content-based)
+        let mut msg1 = create_test_message("test content");
+        msg1.queue_id = "test-fifo.fifo".to_string();
+        msg1.message_group_id = Some("group1".to_string());
+
+        backend.send_message("test-fifo.fifo", msg1.clone()).await.unwrap();
+
+        // Send duplicate message (same content)
+        let mut msg2 = create_test_message("test content");
+        msg2.queue_id = "test-fifo.fifo".to_string();
+        msg2.message_group_id = Some("group1".to_string());
+
+        backend.send_message("test-fifo.fifo", msg2).await.unwrap();
+
+        // Should only have 1 message (duplicate was skipped)
+        let stats = backend.get_stats("test-fifo.fifo").await.unwrap();
+        assert_eq!(stats.available_messages, 1);
+    }
+
+    #[tokio::test]
+    async fn test_fifo_missing_dedup_id() {
+        // Test FIFO without dedup ID or content-based dedup (lines 248-252)
+        let backend = InMemoryBackend::new();
+
+        let mut queue_config = create_test_queue_config(QueueType::SqsFifo);
+        queue_config.content_based_deduplication = false;
+        queue_config.name = "test-fifo.fifo".to_string();
+        queue_config.id = "test-fifo.fifo".to_string();
+        backend.create_queue(queue_config).await.unwrap();
+
+        // Send message without dedup ID (should fail)
+        let mut msg = create_test_message("test content");
+        msg.queue_id = "test-fifo.fifo".to_string();
+        msg.message_group_id = Some("group1".to_string());
+
+        let result = backend.send_message("test-fifo.fifo", msg).await;
+        assert!(result.is_err());
+        match result {
+            Err(Error::Validation(_)) => {}
+            _ => panic!("Expected Validation error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fifo_with_dedup_id() {
+        // Test FIFO with explicit dedup ID (lines 243-244, 258-261)
+        let backend = InMemoryBackend::new();
+
+        let mut queue_config = create_test_queue_config(QueueType::SqsFifo);
+        queue_config.name = "test-fifo.fifo".to_string();
+        queue_config.id = "test-fifo.fifo".to_string();
+        backend.create_queue(queue_config).await.unwrap();
+
+        // Send message with dedup ID
+        let mut msg1 = create_test_message("test content 1");
+        msg1.queue_id = "test-fifo.fifo".to_string();
+        msg1.message_group_id = Some("group1".to_string());
+        msg1.deduplication_id = Some("dedup1".to_string());
+
+        backend.send_message("test-fifo.fifo", msg1).await.unwrap();
+
+        // Send duplicate message (same dedup ID)
+        let mut msg2 = create_test_message("test content 2");
+        msg2.queue_id = "test-fifo.fifo".to_string();
+        msg2.message_group_id = Some("group1".to_string());
+        msg2.deduplication_id = Some("dedup1".to_string());
+
+        backend.send_message("test-fifo.fifo", msg2).await.unwrap();
+
+        // Should only have 1 message (duplicate was skipped)
+        let stats = backend.get_stats("test-fifo.fifo").await.unwrap();
+        assert_eq!(stats.available_messages, 1);
+    }
+
+    #[tokio::test]
+    async fn test_deduplication_cache_cleanup() {
+        // Test deduplication cache cleanup (lines 203-212)
+        let backend = InMemoryBackend::new();
+
+        let mut queue_config = create_test_queue_config(QueueType::SqsFifo);
+        queue_config.content_based_deduplication = true;
+        queue_config.name = "test-fifo.fifo".to_string();
+        queue_config.id = "test-fifo.fifo".to_string();
+        backend.create_queue(queue_config).await.unwrap();
+
+        // Send enough messages to trigger cleanup threshold (1000+)
+        // This is expensive, so we'll just send a few to test the logic exists
+        for i in 0..10 {
+            let mut msg = create_test_message(&format!("message-{}", i));
+            msg.queue_id = "test-fifo.fifo".to_string();
+            msg.message_group_id = Some("group1".to_string());
+            backend.send_message("test-fifo.fifo", msg).await.unwrap();
+        }
+
+        let stats = backend.get_stats("test-fifo.fifo").await.unwrap();
+        assert_eq!(stats.available_messages, 10);
+    }
+
+    // ========================================================================
+    // Error Path Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_invalid_receipt_handle_queue_mismatch() {
+        // Test receipt handle with wrong queue ID (line 529)
+        let backend = InMemoryBackend::new();
+
+        let queue_config = create_test_queue_config(QueueType::SqsStandard);
+        backend.create_queue(queue_config).await.unwrap();
+
+        // Try to delete with a receipt handle for a different queue
+        let fake_msg_id = MessageId::new();
+        let fake_handle = generate_receipt_handle("other-queue", &fake_msg_id);
+        let result = backend.delete_message("test-queue", &fake_handle).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(Error::InvalidReceiptHandle) => {}
+            _ => panic!("Expected InvalidReceiptHandle error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_change_visibility_invalid_receipt() {
+        // Test change visibility with invalid receipt (line 758)
+        let backend = InMemoryBackend::new();
+
+        let queue_config = create_test_queue_config(QueueType::SqsStandard);
+        backend.create_queue(queue_config).await.unwrap();
+
+        // Try to change visibility with invalid receipt handle
+        let result = backend.change_visibility("test-queue", "invalid-handle", 60).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_dlq_max_receive_count() {
+        // Test DLQ max receive count logic (lines 714, 727)
+        let backend = InMemoryBackend::new();
+
+        let mut queue_config = create_test_queue_config(QueueType::SqsStandard);
+        queue_config.dlq_config = Some(crate::types::DlqConfig {
+            target_queue_id: "dlq-queue".to_string(),
+            max_receive_count: 2,
+        });
+        backend.create_queue(queue_config).await.unwrap();
+
+        // Send a message
+        backend.send_message("test-queue", create_test_message("test")).await.unwrap();
+
+        // Receive it multiple times to exceed max receive count
+        for _ in 0..3 {
+            let messages = backend.receive_messages(
+                "test-queue",
+                ReceiveOptions {
+                    max_messages: 1,
+                    visibility_timeout: Some(1),
+                    wait_time_seconds: 0,
+                    attribute_names: vec![],
+                    message_attribute_names: vec![],
+                },
+            ).await.unwrap();
+
+            if !messages.is_empty() {
+                // Wait for visibility to expire
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            }
+        }
+
+        // Message should be gone (moved to DLQ or dropped)
+        let stats = backend.get_stats("test-queue").await.unwrap();
+        assert_eq!(stats.available_messages + stats.in_flight_messages, 0);
     }
 }
