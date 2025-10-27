@@ -96,29 +96,6 @@ jobs:
           docker stop lclq-test
           docker rm lclq-test
 
-  # Run benchmarks (don't fail on performance regression, just measure)
-  bench:
-    name: Benchmarks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Run benchmarks
-        run: cargo bench --no-fail-fast | tee benchmark-results.txt
-        env:
-          LCLQ_RECEIPT_SECRET: test-secret-key-for-ci-testing-only
-
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results
-          path: benchmark-results.txt
-
   # Integration tests with Python SDK
   integration-python:
     name: Integration - Python
@@ -212,6 +189,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
+          cache-dependency-path: tests/integration/go/go.sum
 
       - name: Build lclq
         run: cargo build --release
