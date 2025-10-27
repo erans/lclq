@@ -19,11 +19,10 @@ pub mod proto {
     include!("generated/google.pubsub.v1.rs");
 }
 
-pub mod types;
-pub mod publisher;
-pub mod subscriber;
 pub mod grpc_server;
+pub mod publisher;
 pub mod rest;
+pub mod subscriber;
+pub mod types;
 
 pub use types::*;
-

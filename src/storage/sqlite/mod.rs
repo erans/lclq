@@ -5,16 +5,14 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use tracing::{debug, info};
 
 use crate::core::receipt::{generate_receipt_handle, parse_receipt_handle};
 use crate::error::{Error, Result};
 use crate::storage::{ReceivedMessage, StorageBackend};
-use crate::types::{
-    Message, MessageId, QueueConfig, QueueStats, QueueType, ReceiveOptions,
-};
+use crate::types::{Message, MessageId, QueueConfig, QueueStats, QueueType, ReceiveOptions};
 
 /// SQLite storage backend configuration.
 #[derive(Debug, Clone)]
@@ -90,7 +88,7 @@ impl SqliteBackend {
             WHERE state = 'in_flight'
               AND visibility_expires_at IS NOT NULL
               AND visibility_expires_at <= ?
-            "#
+            "#,
         )
         .bind(now)
         .bind(now)
@@ -100,7 +98,10 @@ impl SqliteBackend {
 
         let count = result.rows_affected();
         if count > 0 {
-            info!(messages_returned = count, "Returned expired messages to queue");
+            info!(
+                messages_returned = count,
+                "Returned expired messages to queue"
+            );
         }
 
         Ok(count)
@@ -110,13 +111,13 @@ impl SqliteBackend {
     pub async fn cleanup_deduplication_cache(&self) -> Result<u64> {
         let now = Utc::now().timestamp();
 
-        let result = sqlx::query(
-            "DELETE FROM deduplication_cache WHERE expires_at <= ?"
-        )
-        .bind(now)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| Error::StorageError(format!("Failed to cleanup deduplication cache: {}", e)))?;
+        let result = sqlx::query("DELETE FROM deduplication_cache WHERE expires_at <= ?")
+            .bind(now)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                Error::StorageError(format!("Failed to cleanup deduplication cache: {}", e))
+            })?;
 
         let count = result.rows_affected();
         if count > 0 {
@@ -131,12 +132,12 @@ impl SqliteBackend {
         let now = Utc::now().timestamp_millis();
 
         // Get all queues to check their retention periods
-        let queues = sqlx::query(
-            "SELECT id, message_retention_period FROM queues"
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| Error::StorageError(format!("Failed to get queues for retention cleanup: {}", e)))?;
+        let queues = sqlx::query("SELECT id, message_retention_period FROM queues")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                Error::StorageError(format!("Failed to get queues for retention cleanup: {}", e))
+            })?;
 
         let mut total_deleted = 0u64;
 
@@ -148,14 +149,15 @@ impl SqliteBackend {
             // Delete messages older than retention period
             let cutoff_timestamp = now - retention_millis;
 
-            let result = sqlx::query(
-                "DELETE FROM messages WHERE queue_id = ? AND sent_timestamp < ?"
-            )
-            .bind(&queue_id)
-            .bind(cutoff_timestamp)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| Error::StorageError(format!("Failed to delete expired messages: {}", e)))?;
+            let result =
+                sqlx::query("DELETE FROM messages WHERE queue_id = ? AND sent_timestamp < ?")
+                    .bind(&queue_id)
+                    .bind(cutoff_timestamp)
+                    .execute(&self.pool)
+                    .await
+                    .map_err(|e| {
+                        Error::StorageError(format!("Failed to delete expired messages: {}", e))
+                    })?;
 
             let count = result.rows_affected();
             if count > 0 {
@@ -169,7 +171,10 @@ impl SqliteBackend {
         }
 
         if total_deleted > 0 {
-            info!(total_deleted = total_deleted, "Deleted expired messages across all queues");
+            info!(
+                total_deleted = total_deleted,
+                "Deleted expired messages across all queues"
+            );
         }
 
         Ok(total_deleted)
@@ -206,8 +211,10 @@ impl SqliteBackend {
         };
 
         let sent_timestamp_millis: i64 = row.get("sent_timestamp");
-        let sent_timestamp = DateTime::from_timestamp_millis(sent_timestamp_millis)
-            .ok_or_else(|| Error::StorageError(format!("Invalid timestamp: {}", sent_timestamp_millis)))?;
+        let sent_timestamp =
+            DateTime::from_timestamp_millis(sent_timestamp_millis).ok_or_else(|| {
+                Error::StorageError(format!("Invalid timestamp: {}", sent_timestamp_millis))
+            })?;
 
         Ok(Message {
             id: MessageId(row.get("id")),
@@ -218,7 +225,9 @@ impl SqliteBackend {
             receive_count: row.get::<i64, _>("receive_count") as u32,
             message_group_id: row.get("message_group_id"),
             deduplication_id: row.get("deduplication_id"),
-            sequence_number: row.get::<Option<i64>, _>("sequence_number").map(|n| n as u64),
+            sequence_number: row
+                .get::<Option<i64>, _>("sequence_number")
+                .map(|n| n as u64),
             delay_seconds: row.get::<Option<i64>, _>("delay_seconds").map(|d| d as u32),
         })
     }
@@ -293,7 +302,7 @@ impl SqliteBackend {
 
             // Get next sequence number
             let sequence_number: i64 = sqlx::query_scalar(
-                "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM messages WHERE queue_id = ?"
+                "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM messages WHERE queue_id = ?",
             )
             .bind(queue_id)
             .fetch_one(&self.pool)
@@ -322,7 +331,7 @@ impl SqliteBackend {
                 receive_count, message_group_id, deduplication_id, sequence_number,
                 delay_seconds, state
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'available')
-            "#
+            "#,
         )
         .bind(&message.id.0)
         .bind(queue_id)
@@ -488,7 +497,7 @@ impl StorageBackend for SqliteBackend {
                     FROM queues
                     WHERE name LIKE ? || '%'
                     ORDER BY name
-                    "#
+                    "#,
                 )
                 .bind(prefix)
                 .fetch_all(&self.pool)
@@ -502,7 +511,7 @@ impl StorageBackend for SqliteBackend {
                            dlq_config, tags, redrive_allow_policy
                     FROM queues
                     ORDER BY name
-                    "#
+                    "#,
                 )
                 .fetch_all(&self.pool)
                 .await
@@ -516,7 +525,7 @@ impl StorageBackend for SqliteBackend {
                        dlq_config, tags, redrive_allow_policy
                 FROM queues
                 ORDER BY name
-                "#
+                "#,
             )
             .fetch_all(&self.pool)
             .await
@@ -629,7 +638,10 @@ impl StorageBackend for SqliteBackend {
         debug!(queue_id = %queue_id, message_count = messages.len(), "Sending batch of messages to SQLite");
 
         // Start a transaction for atomicity
-        let mut tx = self.pool.begin().await
+        let mut tx = self
+            .pool
+            .begin()
+            .await
             .map_err(|e| Error::StorageError(format!("Failed to begin transaction: {}", e)))?;
 
         let mut results = Vec::new();
@@ -640,7 +652,8 @@ impl StorageBackend for SqliteBackend {
         }
 
         // Commit transaction - all messages succeed or all fail
-        tx.commit().await
+        tx.commit()
+            .await
             .map_err(|e| Error::StorageError(format!("Failed to commit transaction: {}", e)))?;
 
         info!(queue_id = %queue_id, message_count = results.len(), "Batch messages sent to SQLite");
@@ -667,7 +680,10 @@ impl StorageBackend for SqliteBackend {
         let mut received = Vec::new();
 
         // Start a transaction
-        let mut tx = self.pool.begin().await
+        let mut tx = self
+            .pool
+            .begin()
+            .await
             .map_err(|e| Error::StorageError(format!("Failed to begin transaction: {}", e)))?;
 
         // For FIFO queues, respect message group ordering
@@ -688,7 +704,9 @@ impl StorageBackend for SqliteBackend {
                     max_messages
                 )
             } else {
-                let placeholders: Vec<_> = (0..in_flight_groups.len()).map(|i| format!("?{}", i + 3)).collect();
+                let placeholders: Vec<_> = (0..in_flight_groups.len())
+                    .map(|i| format!("?{}", i + 3))
+                    .collect();
                 format!(
                     "SELECT * FROM messages WHERE queue_id = ? AND state = 'available' AND visible_at <= ? AND (message_group_id IS NULL OR message_group_id NOT IN ({})) ORDER BY sequence_number LIMIT {}",
                     placeholders.join(", "),
@@ -696,15 +714,15 @@ impl StorageBackend for SqliteBackend {
                 )
             };
 
-            let mut query = sqlx::query(&query_str)
-                .bind(queue_id)
-                .bind(now_millis);
+            let mut query = sqlx::query(&query_str).bind(queue_id).bind(now_millis);
 
             for group in &in_flight_groups {
                 query = query.bind(group);
             }
 
-            let rows = query.fetch_all(&mut *tx).await
+            let rows = query
+                .fetch_all(&mut *tx)
+                .await
                 .map_err(|e| Error::StorageError(format!("Failed to fetch messages: {}", e)))?;
 
             for row in rows {
@@ -713,10 +731,12 @@ impl StorageBackend for SqliteBackend {
                 message.receive_count += 1;
 
                 // Generate receipt handle
-                let receipt_handle = generate_receipt_handle(queue_id, &MessageId(message_id.clone()));
+                let receipt_handle =
+                    generate_receipt_handle(queue_id, &MessageId(message_id.clone()));
 
                 // Update message to in_flight state
-                let visibility_expires_at = (now + Duration::seconds(visibility_timeout as i64)).timestamp_millis();
+                let visibility_expires_at =
+                    (now + Duration::seconds(visibility_timeout as i64)).timestamp_millis();
                 sqlx::query(
                     "UPDATE messages SET state = 'in_flight', receive_count = ?, receipt_handle = ?, visibility_expires_at = ? WHERE id = ?"
                 )
@@ -750,8 +770,10 @@ impl StorageBackend for SqliteBackend {
                 let mut message = self.parse_message_row(&row)?;
                 message.receive_count += 1;
 
-                let receipt_handle = generate_receipt_handle(queue_id, &MessageId(message_id.clone()));
-                let visibility_expires_at = (now + Duration::seconds(visibility_timeout as i64)).timestamp_millis();
+                let receipt_handle =
+                    generate_receipt_handle(queue_id, &MessageId(message_id.clone()));
+                let visibility_expires_at =
+                    (now + Duration::seconds(visibility_timeout as i64)).timestamp_millis();
 
                 sqlx::query(
                     "UPDATE messages SET state = 'in_flight', receive_count = ?, receipt_handle = ?, visibility_expires_at = ? WHERE id = ?"
@@ -771,7 +793,8 @@ impl StorageBackend for SqliteBackend {
             }
         }
 
-        tx.commit().await
+        tx.commit()
+            .await
             .map_err(|e| Error::StorageError(format!("Failed to commit transaction: {}", e)))?;
 
         debug!(
@@ -793,7 +816,7 @@ impl StorageBackend for SqliteBackend {
         }
 
         let result = sqlx::query(
-            "DELETE FROM messages WHERE queue_id = ? AND id = ? AND receipt_handle = ?"
+            "DELETE FROM messages WHERE queue_id = ? AND id = ? AND receipt_handle = ?",
         )
         .bind(queue_id)
         .bind(&handle_data.message_id.0)
@@ -848,7 +871,8 @@ impl StorageBackend for SqliteBackend {
             );
         } else {
             // Update visibility timeout
-            let visibility_expires_at = (Utc::now() + Duration::seconds(visibility_timeout as i64)).timestamp_millis();
+            let visibility_expires_at =
+                (Utc::now() + Duration::seconds(visibility_timeout as i64)).timestamp_millis();
 
             let result = sqlx::query(
                 "UPDATE messages SET visibility_expires_at = ? WHERE queue_id = ? AND id = ? AND receipt_handle = ?"
@@ -899,7 +923,7 @@ impl StorageBackend for SqliteBackend {
         self.get_queue(queue_id).await?;
 
         let available: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM messages WHERE queue_id = ? AND state = 'available'"
+            "SELECT COUNT(*) FROM messages WHERE queue_id = ? AND state = 'available'",
         )
         .bind(queue_id)
         .fetch_one(&self.pool)
@@ -907,7 +931,7 @@ impl StorageBackend for SqliteBackend {
         .map_err(|e| Error::StorageError(format!("Failed to get stats: {}", e)))?;
 
         let in_flight: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM messages WHERE queue_id = ? AND state = 'in_flight'"
+            "SELECT COUNT(*) FROM messages WHERE queue_id = ? AND state = 'in_flight'",
         )
         .bind(queue_id)
         .fetch_one(&self.pool)
@@ -915,7 +939,7 @@ impl StorageBackend for SqliteBackend {
         .map_err(|e| Error::StorageError(format!("Failed to get stats: {}", e)))?;
 
         let oldest_timestamp: Option<i64> = sqlx::query_scalar(
-            "SELECT MIN(sent_timestamp) FROM messages WHERE queue_id = ? AND state = 'available'"
+            "SELECT MIN(sent_timestamp) FROM messages WHERE queue_id = ? AND state = 'available'",
         )
         .bind(queue_id)
         .fetch_one(&self.pool)
@@ -926,9 +950,8 @@ impl StorageBackend for SqliteBackend {
             available_messages: available as u64,
             in_flight_messages: in_flight as u64,
             dlq_messages: 0, // TODO: Track DLQ messages
-            oldest_message_timestamp: oldest_timestamp.and_then(|ts| {
-                DateTime::from_timestamp_millis(ts)
-            }),
+            oldest_message_timestamp: oldest_timestamp
+                .and_then(DateTime::from_timestamp_millis),
         })
     }
 

@@ -1,7 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
-use lclq::types::{Message, MessageId, MessageAttributeValue};
-use std::collections::HashMap;
 use chrono::Utc;
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use lclq::types::{Message, MessageAttributeValue, MessageId};
+use std::collections::HashMap;
 
 /// Create a test message with given body size
 fn create_test_message(body_size: usize) -> Message {
@@ -57,7 +57,7 @@ fn bench_md5_body_hash(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
             b.iter(|| {
-                use md5::{Md5, Digest};
+                use md5::{Digest, Md5};
                 let mut hasher = Md5::new();
                 hasher.update(body.as_bytes());
                 let result = hasher.finalize();
@@ -111,11 +111,15 @@ fn bench_message_with_attributes(c: &mut Criterion) {
         let msg = create_message_with_attributes(1024, *attr_count);
 
         group.throughput(Throughput::Elements(*attr_count as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(attr_count), attr_count, |b, _| {
-            b.iter(|| {
-                black_box(serde_json::to_string(&msg).unwrap());
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(attr_count),
+            attr_count,
+            |b, _| {
+                b.iter(|| {
+                    black_box(serde_json::to_string(&msg).unwrap());
+                });
+            },
+        );
     }
     group.finish();
 }

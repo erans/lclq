@@ -7,15 +7,15 @@ use tracing::info;
 
 use crate::config::LclqConfig;
 use crate::core::cleanup::CleanupManager;
-use crate::pubsub::grpc_server::{start_grpc_server, GrpcServerConfig};
-use crate::pubsub::rest::{start_rest_server, RestServerConfig};
+use crate::pubsub::grpc_server::{GrpcServerConfig, start_grpc_server};
+use crate::pubsub::rest::{RestServerConfig, start_rest_server};
 use crate::server::admin::start_admin_server;
 use crate::server::metrics::start_metrics_server;
-use crate::server::shutdown::{shutdown_with_timeout, ShutdownSignal};
+use crate::server::shutdown::{ShutdownSignal, shutdown_with_timeout};
 use crate::sqs::start_sqs_server;
+use crate::storage::StorageBackend;
 use crate::storage::memory::InMemoryBackend;
 use crate::storage::sqlite::{SqliteBackend, SqliteConfig};
-use crate::storage::StorageBackend;
 
 /// Execute the start command - launches the lclq server with all services
 #[allow(clippy::too_many_arguments)]
@@ -35,7 +35,9 @@ pub async fn execute(
 
     // Check if both services are disabled
     if disable_sqs && disable_pubsub {
-        anyhow::bail!("Cannot start lclq with both SQS and Pub/Sub disabled. Enable at least one service.");
+        anyhow::bail!(
+            "Cannot start lclq with both SQS and Pub/Sub disabled. Enable at least one service."
+        );
     }
 
     // Load configuration
@@ -112,7 +114,14 @@ pub async fn execute(
     let admin_shutdown_rx = shutdown_signal.subscribe();
     let admin_bind_address = bind_address.clone();
     let admin_handle = tokio::spawn(async move {
-        if let Err(e) = start_admin_server(admin_backend, admin_bind_address, admin_port, admin_shutdown_rx).await {
+        if let Err(e) = start_admin_server(
+            admin_backend,
+            admin_bind_address,
+            admin_port,
+            admin_shutdown_rx,
+        )
+        .await
+        {
             tracing::error!("Admin API server error: {}", e);
         }
     });
@@ -122,7 +131,9 @@ pub async fn execute(
     let metrics_shutdown_rx = shutdown_signal.subscribe();
     let metrics_bind_address = bind_address.clone();
     let metrics_handle = tokio::spawn(async move {
-        if let Err(e) = start_metrics_server(metrics_bind_address, metrics_port, metrics_shutdown_rx).await {
+        if let Err(e) =
+            start_metrics_server(metrics_bind_address, metrics_port, metrics_shutdown_rx).await
+        {
             tracing::error!("Metrics server error: {}", e);
         }
     });
@@ -148,7 +159,9 @@ pub async fn execute(
             let grpc_config = GrpcServerConfig {
                 bind_address: format!("{}:{}", pubsub_grpc_bind_address, pubsub_port),
             };
-            if let Err(e) = start_grpc_server(grpc_config, pubsub_grpc_backend, pubsub_grpc_shutdown_rx).await {
+            if let Err(e) =
+                start_grpc_server(grpc_config, pubsub_grpc_backend, pubsub_grpc_shutdown_rx).await
+            {
                 tracing::error!("Pub/Sub gRPC server error: {}", e);
             }
         });
@@ -161,7 +174,9 @@ pub async fn execute(
             let rest_config = RestServerConfig {
                 bind_address: format!("{}:{}", pubsub_rest_bind_address, pubsub_rest_port),
             };
-            if let Err(e) = start_rest_server(rest_config, pubsub_rest_backend, pubsub_rest_shutdown_rx).await {
+            if let Err(e) =
+                start_rest_server(rest_config, pubsub_rest_backend, pubsub_rest_shutdown_rx).await
+            {
                 tracing::error!("Pub/Sub REST server error: {}", e);
             }
         });

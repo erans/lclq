@@ -24,11 +24,11 @@
 use crate::error::Result;
 use crate::storage::StorageBackend;
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, put},
-    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -55,7 +55,11 @@ impl RestState {
     }
 
     /// Convert REST Topic to internal QueueConfig.
-    fn topic_to_queue_config(topic: &Topic, project: &str, topic_name: &str) -> Result<crate::types::QueueConfig> {
+    fn topic_to_queue_config(
+        topic: &Topic,
+        project: &str,
+        topic_name: &str,
+    ) -> Result<crate::types::QueueConfig> {
         let topic_id = format!("{}:{}", project, topic_name);
         let full_name = format!("projects/{}/topics/{}", project, topic_name);
 
@@ -92,22 +96,28 @@ impl RestState {
     }
 
     /// Convert REST Subscription to internal SubscriptionConfig.
-    fn subscription_to_config(subscription: &Subscription, project: &str, sub_name: &str) -> Result<crate::types::SubscriptionConfig> {
+    fn subscription_to_config(
+        subscription: &Subscription,
+        project: &str,
+        sub_name: &str,
+    ) -> Result<crate::types::SubscriptionConfig> {
         let sub_id = format!("{}:{}", project, sub_name);
         let full_name = format!("projects/{}/subscriptions/{}", project, sub_name);
 
         // Parse topic name to extract project and topic
         let topic_parts: Vec<&str> = subscription.topic.split('/').collect();
-        let topic_id = if topic_parts.len() == 4 && topic_parts[0] == "projects" && topic_parts[2] == "topics" {
-            format!("{}:{}", topic_parts[1], topic_parts[3])
-        } else {
-            return Err(crate::error::Error::Validation(
-                crate::error::ValidationError::InvalidParameter {
-                    name: "topic".to_string(),
-                    reason: format!("Invalid topic name format: {}", subscription.topic),
-                }
-            ));
-        };
+        let topic_id =
+            if topic_parts.len() == 4 && topic_parts[0] == "projects" && topic_parts[2] == "topics"
+            {
+                format!("{}:{}", topic_parts[1], topic_parts[3])
+            } else {
+                return Err(crate::error::Error::Validation(
+                    crate::error::ValidationError::InvalidParameter {
+                        name: "topic".to_string(),
+                        reason: format!("Invalid topic name format: {}", subscription.topic),
+                    },
+                ));
+            };
 
         Ok(crate::types::SubscriptionConfig {
             id: sub_id,
@@ -161,18 +171,19 @@ impl RestState {
             enable_message_ordering: Some(config.enable_message_ordering),
             expiration_policy: None,
             filter: config.filter.clone(),
-            dead_letter_policy: config.dead_letter_policy.as_ref().map(|dlp| {
-                DeadLetterPolicy {
+            dead_letter_policy: config
+                .dead_letter_policy
+                .as_ref()
+                .map(|dlp| DeadLetterPolicy {
                     dead_letter_topic: dlp.dead_letter_topic.clone(),
                     max_delivery_attempts: Some(dlp.max_delivery_attempts as i32),
-                }
-            }),
+                }),
         }
     }
 
     /// Convert REST PubsubMessage to internal Message.
     fn pubsub_message_to_message(msg: &PubsubMessage, topic_id: &str) -> crate::types::Message {
-        use crate::types::{Message, MessageAttributes, MessageAttributeValue, MessageId};
+        use crate::types::{Message, MessageAttributeValue, MessageAttributes, MessageId};
         use chrono::Utc;
 
         let mut attributes = MessageAttributes::new();
@@ -225,7 +236,11 @@ impl RestState {
 
         PubsubMessage {
             data,
-            attributes: if attributes.is_empty() { None } else { Some(attributes) },
+            attributes: if attributes.is_empty() {
+                None
+            } else {
+                Some(attributes)
+            },
             message_id: Some(msg.id.0.clone()),
             publish_time: Some(msg.sent_timestamp.to_rfc3339()),
             ordering_key: msg.message_group_id.clone(),
@@ -274,7 +289,8 @@ impl ErrorResponse {
 
 impl IntoResponse for ErrorResponse {
     fn into_response(self) -> Response {
-        let status = StatusCode::from_u16(self.error.code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let status =
+            StatusCode::from_u16(self.error.code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         (status, Json(self)).into_response()
     }
 }
@@ -595,11 +611,21 @@ async fn handle_topic_action(
     if let Some((topic, action)) = topic_action.rsplit_once(':') {
         match action {
             "publish" => {
-                let publish_req: PublishRequest = serde_json::from_value(payload)
-                    .map_err(|e| ErrorResponse::new(StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)))?;
-                let response = publish(Path((project, topic.to_string())), State(state), Json(publish_req)).await?;
-                let value = serde_json::to_value(response.0)
-                    .map_err(|e| ErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to serialize response: {}", e)))?;
+                let publish_req: PublishRequest = serde_json::from_value(payload).map_err(|e| {
+                    ErrorResponse::new(StatusCode::BAD_REQUEST, format!("Invalid request: {}", e))
+                })?;
+                let response = publish(
+                    Path((project, topic.to_string())),
+                    State(state),
+                    Json(publish_req),
+                )
+                .await?;
+                let value = serde_json::to_value(response.0).map_err(|e| {
+                    ErrorResponse::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to serialize response: {}", e),
+                    )
+                })?;
                 Ok(Json(value))
             }
             _ => Err(ErrorResponse::new(
@@ -634,8 +660,10 @@ async fn create_topic(
     }
 
     // Convert to queue config
-    let queue_config = RestState::topic_to_queue_config(&payload, &project, &topic)
-        .map_err(|e| ErrorResponse::new(StatusCode::BAD_REQUEST, format!("Invalid topic: {}", e)))?;
+    let queue_config =
+        RestState::topic_to_queue_config(&payload, &project, &topic).map_err(|e| {
+            ErrorResponse::new(StatusCode::BAD_REQUEST, format!("Invalid topic: {}", e))
+        })?;
 
     // Create in backend
     let created_config = state
@@ -643,10 +671,14 @@ async fn create_topic(
         .create_queue(queue_config)
         .await
         .map_err(|e| match e {
-            crate::error::Error::QueueAlreadyExists(_) => {
-                ErrorResponse::new(StatusCode::CONFLICT, format!("Topic already exists: {}/{}", project, topic))
-            }
-            _ => ErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create topic: {}", e)),
+            crate::error::Error::QueueAlreadyExists(_) => ErrorResponse::new(
+                StatusCode::CONFLICT,
+                format!("Topic already exists: {}/{}", project, topic),
+            ),
+            _ => ErrorResponse::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create topic: {}", e),
+            ),
         })?;
 
     let response_topic = RestState::queue_config_to_topic(&created_config);
@@ -662,11 +694,12 @@ async fn get_topic(
     let topic_id = format!("{}:{}", project, topic);
 
     // Get from backend
-    let config = state
-        .backend
-        .get_queue(&topic_id)
-        .await
-        .map_err(|_| ErrorResponse::new(StatusCode::NOT_FOUND, format!("Topic not found: {}/{}", project, topic)))?;
+    let config = state.backend.get_queue(&topic_id).await.map_err(|_| {
+        ErrorResponse::new(
+            StatusCode::NOT_FOUND,
+            format!("Topic not found: {}/{}", project, topic),
+        )
+    })?;
 
     let response_topic = RestState::queue_config_to_topic(&config);
     Ok(Json(response_topic))
@@ -681,11 +714,12 @@ async fn delete_topic(
     let topic_id = format!("{}:{}", project, topic);
 
     // Delete from backend
-    state
-        .backend
-        .delete_queue(&topic_id)
-        .await
-        .map_err(|_| ErrorResponse::new(StatusCode::NOT_FOUND, format!("Topic not found: {}/{}", project, topic)))?;
+    state.backend.delete_queue(&topic_id).await.map_err(|_| {
+        ErrorResponse::new(
+            StatusCode::NOT_FOUND,
+            format!("Topic not found: {}/{}", project, topic),
+        )
+    })?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -698,11 +732,12 @@ async fn list_topics(
     debug!("REST: ListTopics {}", project);
 
     // List all queues and filter for Pub/Sub topics
-    let configs = state
-        .backend
-        .list_queues(None)
-        .await
-        .map_err(|e| ErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to list topics: {}", e)))?;
+    let configs = state.backend.list_queues(None).await.map_err(|e| {
+        ErrorResponse::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to list topics: {}", e),
+        )
+    })?;
 
     let topics: Vec<Topic> = configs
         .iter()
@@ -728,16 +763,22 @@ async fn publish(
     State(state): State<RestState>,
     Json(payload): Json<PublishRequest>,
 ) -> std::result::Result<Json<PublishResponse>, ErrorResponse> {
-    debug!("REST: Publish {} messages to {}/{}", payload.messages.len(), project, topic);
+    debug!(
+        "REST: Publish {} messages to {}/{}",
+        payload.messages.len(),
+        project,
+        topic
+    );
 
     let topic_id = format!("{}:{}", project, topic);
 
     // Verify topic exists
-    state
-        .backend
-        .get_queue(&topic_id)
-        .await
-        .map_err(|_| ErrorResponse::new(StatusCode::NOT_FOUND, format!("Topic not found: {}/{}", project, topic)))?;
+    state.backend.get_queue(&topic_id).await.map_err(|_| {
+        ErrorResponse::new(
+            StatusCode::NOT_FOUND,
+            format!("Topic not found: {}/{}", project, topic),
+        )
+    })?;
 
     // Convert messages
     let messages: Vec<crate::types::Message> = payload
@@ -751,7 +792,12 @@ async fn publish(
         .backend
         .send_messages(&topic_id, messages)
         .await
-        .map_err(|e| ErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to publish messages: {}", e)))?;
+        .map_err(|e| {
+            ErrorResponse::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to publish messages: {}", e),
+            )
+        })?;
 
     // Build response with message IDs
     let message_ids: Vec<String> = published.iter().map(|m| m.id.0.clone()).collect();
@@ -774,12 +820,18 @@ async fn create_subscription(
     // Validate subscription ID
     use crate::pubsub::types::validate_subscription_id;
     validate_subscription_id(&subscription).map_err(|e| {
-        ErrorResponse::new(StatusCode::BAD_REQUEST, format!("Invalid subscription ID: {}", e))
+        ErrorResponse::new(
+            StatusCode::BAD_REQUEST,
+            format!("Invalid subscription ID: {}", e),
+        )
     })?;
 
     // Set the name from path if not provided
     if payload.name.is_none() {
-        payload.name = Some(format!("projects/{}/subscriptions/{}", project, subscription));
+        payload.name = Some(format!(
+            "projects/{}/subscriptions/{}",
+            project, subscription
+        ));
     }
 
     // Parse topic name to extract topic_id and verify topic exists
@@ -793,22 +845,33 @@ async fn create_subscription(
     let topic_id = format!("{}:{}", topic_parts[1], topic_parts[3]);
 
     // Verify topic exists
-    state
-        .backend
-        .get_queue(&topic_id)
-        .await
-        .map_err(|_| ErrorResponse::new(StatusCode::NOT_FOUND, format!("Topic not found: {}", payload.topic)))?;
+    state.backend.get_queue(&topic_id).await.map_err(|_| {
+        ErrorResponse::new(
+            StatusCode::NOT_FOUND,
+            format!("Topic not found: {}", payload.topic),
+        )
+    })?;
 
     // Convert to subscription config
-    let config = RestState::subscription_to_config(&payload, &project, &subscription)
-        .map_err(|e| ErrorResponse::new(StatusCode::BAD_REQUEST, format!("Invalid subscription: {}", e)))?;
+    let config =
+        RestState::subscription_to_config(&payload, &project, &subscription).map_err(|e| {
+            ErrorResponse::new(
+                StatusCode::BAD_REQUEST,
+                format!("Invalid subscription: {}", e),
+            )
+        })?;
 
     // Create in backend
     let created_config = state
         .backend
         .create_subscription(config)
         .await
-        .map_err(|e| ErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create subscription: {}", e)))?;
+        .map_err(|e| {
+            ErrorResponse::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create subscription: {}", e),
+            )
+        })?;
 
     let response_sub = RestState::config_to_subscription(&created_config);
     Ok(Json(response_sub))
@@ -823,11 +886,12 @@ async fn get_subscription(
     let sub_id = format!("{}:{}", project, subscription);
 
     // Get from backend
-    let config = state
-        .backend
-        .get_subscription(&sub_id)
-        .await
-        .map_err(|_| ErrorResponse::new(StatusCode::NOT_FOUND, format!("Subscription not found: {}/{}", project, subscription)))?;
+    let config = state.backend.get_subscription(&sub_id).await.map_err(|_| {
+        ErrorResponse::new(
+            StatusCode::NOT_FOUND,
+            format!("Subscription not found: {}/{}", project, subscription),
+        )
+    })?;
 
     let response_sub = RestState::config_to_subscription(&config);
     Ok(Json(response_sub))
@@ -846,7 +910,12 @@ async fn delete_subscription(
         .backend
         .delete_subscription(&sub_id)
         .await
-        .map_err(|_| ErrorResponse::new(StatusCode::NOT_FOUND, format!("Subscription not found: {}/{}", project, subscription)))?;
+        .map_err(|_| {
+            ErrorResponse::new(
+                StatusCode::NOT_FOUND,
+                format!("Subscription not found: {}/{}", project, subscription),
+            )
+        })?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -859,11 +928,12 @@ async fn list_subscriptions(
     debug!("REST: ListSubscriptions {}", project);
 
     // List all subscriptions
-    let configs = state
-        .backend
-        .list_subscriptions()
-        .await
-        .map_err(|e| ErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to list subscriptions: {}", e)))?;
+    let configs = state.backend.list_subscriptions().await.map_err(|e| {
+        ErrorResponse::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to list subscriptions: {}", e),
+        )
+    })?;
 
     let subscriptions: Vec<Subscription> = configs
         .iter()
@@ -893,21 +963,43 @@ async fn handle_subscription_action(
     if let Some((subscription, action)) = subscription_action.rsplit_once(':') {
         match action {
             "pull" => {
-                let pull_req: PullRequest = serde_json::from_value(payload)
-                    .map_err(|e| ErrorResponse::new(StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)))?;
-                let response = pull(Path((project, subscription.to_string())), State(state), Json(pull_req)).await?;
+                let pull_req: PullRequest = serde_json::from_value(payload).map_err(|e| {
+                    ErrorResponse::new(StatusCode::BAD_REQUEST, format!("Invalid request: {}", e))
+                })?;
+                let response = pull(
+                    Path((project, subscription.to_string())),
+                    State(state),
+                    Json(pull_req),
+                )
+                .await?;
                 Ok((StatusCode::OK, Json(response.0)).into_response())
             }
             "acknowledge" => {
-                let ack_req: AcknowledgeRequest = serde_json::from_value(payload)
-                    .map_err(|e| ErrorResponse::new(StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)))?;
-                let status = acknowledge(Path((project, subscription.to_string())), State(state), Json(ack_req)).await?;
+                let ack_req: AcknowledgeRequest = serde_json::from_value(payload).map_err(|e| {
+                    ErrorResponse::new(StatusCode::BAD_REQUEST, format!("Invalid request: {}", e))
+                })?;
+                let status = acknowledge(
+                    Path((project, subscription.to_string())),
+                    State(state),
+                    Json(ack_req),
+                )
+                .await?;
                 Ok((status, Json(serde_json::json!({}))).into_response())
             }
             "modifyAckDeadline" => {
                 let modify_req: ModifyAckDeadlineRequest = serde_json::from_value(payload)
-                    .map_err(|e| ErrorResponse::new(StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)))?;
-                let status = modify_ack_deadline(Path((project, subscription.to_string())), State(state), Json(modify_req)).await?;
+                    .map_err(|e| {
+                        ErrorResponse::new(
+                            StatusCode::BAD_REQUEST,
+                            format!("Invalid request: {}", e),
+                        )
+                    })?;
+                let status = modify_ack_deadline(
+                    Path((project, subscription.to_string())),
+                    State(state),
+                    Json(modify_req),
+                )
+                .await?;
                 Ok((status, Json(serde_json::json!({}))).into_response())
             }
             _ => Err(ErrorResponse::new(
@@ -928,16 +1020,20 @@ async fn pull(
     State(state): State<RestState>,
     Json(payload): Json<PullRequest>,
 ) -> std::result::Result<Json<PullResponse>, ErrorResponse> {
-    debug!("REST: Pull {}/{}, max_messages={}", project, subscription, payload.max_messages);
+    debug!(
+        "REST: Pull {}/{}, max_messages={}",
+        project, subscription, payload.max_messages
+    );
 
     let sub_id = format!("{}:{}", project, subscription);
 
     // Get subscription config to find topic
-    let config = state
-        .backend
-        .get_subscription(&sub_id)
-        .await
-        .map_err(|_| ErrorResponse::new(StatusCode::NOT_FOUND, format!("Subscription not found: {}/{}", project, subscription)))?;
+    let config = state.backend.get_subscription(&sub_id).await.map_err(|_| {
+        ErrorResponse::new(
+            StatusCode::NOT_FOUND,
+            format!("Subscription not found: {}/{}", project, subscription),
+        )
+    })?;
 
     // Receive messages from topic
     let options = crate::types::ReceiveOptions {
@@ -952,7 +1048,12 @@ async fn pull(
         .backend
         .receive_messages(&config.topic_id, options)
         .await
-        .map_err(|e| ErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to pull messages: {}", e)))?;
+        .map_err(|e| {
+            ErrorResponse::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to pull messages: {}", e),
+            )
+        })?;
 
     // Convert to REST ReceivedMessage
     let received_messages: Vec<ReceivedMessage> = messages
@@ -984,16 +1085,22 @@ async fn acknowledge(
     State(state): State<RestState>,
     Json(payload): Json<AcknowledgeRequest>,
 ) -> std::result::Result<StatusCode, ErrorResponse> {
-    debug!("REST: Acknowledge {}/{}, {} messages", project, subscription, payload.ack_ids.len());
+    debug!(
+        "REST: Acknowledge {}/{}, {} messages",
+        project,
+        subscription,
+        payload.ack_ids.len()
+    );
 
     let sub_id = format!("{}:{}", project, subscription);
 
     // Get subscription config to find topic
-    let config = state
-        .backend
-        .get_subscription(&sub_id)
-        .await
-        .map_err(|_| ErrorResponse::new(StatusCode::NOT_FOUND, format!("Subscription not found: {}/{}", project, subscription)))?;
+    let config = state.backend.get_subscription(&sub_id).await.map_err(|_| {
+        ErrorResponse::new(
+            StatusCode::NOT_FOUND,
+            format!("Subscription not found: {}/{}", project, subscription),
+        )
+    })?;
 
     // Delete each message using ack_id (receipt handle)
     for ack_id in &payload.ack_ids {
@@ -1001,7 +1108,12 @@ async fn acknowledge(
             .backend
             .delete_message(&config.topic_id, ack_id)
             .await
-            .map_err(|e| ErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to acknowledge message: {}", e)))?;
+            .map_err(|e| {
+                ErrorResponse::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to acknowledge message: {}", e),
+                )
+            })?;
     }
 
     Ok(StatusCode::OK)
@@ -1012,24 +1124,39 @@ async fn modify_ack_deadline(
     State(state): State<RestState>,
     Json(payload): Json<ModifyAckDeadlineRequest>,
 ) -> std::result::Result<StatusCode, ErrorResponse> {
-    debug!("REST: ModifyAckDeadline {}/{}, {} messages", project, subscription, payload.ack_ids.len());
+    debug!(
+        "REST: ModifyAckDeadline {}/{}, {} messages",
+        project,
+        subscription,
+        payload.ack_ids.len()
+    );
 
     let sub_id = format!("{}:{}", project, subscription);
 
     // Get subscription config to find topic
-    let config = state
-        .backend
-        .get_subscription(&sub_id)
-        .await
-        .map_err(|_| ErrorResponse::new(StatusCode::NOT_FOUND, format!("Subscription not found: {}/{}", project, subscription)))?;
+    let config = state.backend.get_subscription(&sub_id).await.map_err(|_| {
+        ErrorResponse::new(
+            StatusCode::NOT_FOUND,
+            format!("Subscription not found: {}/{}", project, subscription),
+        )
+    })?;
 
     // Modify visibility for each ack_id (receipt handle)
     for ack_id in &payload.ack_ids {
         state
             .backend
-            .change_visibility(&config.topic_id, ack_id, payload.ack_deadline_seconds as u32)
+            .change_visibility(
+                &config.topic_id,
+                ack_id,
+                payload.ack_deadline_seconds as u32,
+            )
             .await
-            .map_err(|e| ErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to modify ack deadline: {}", e)))?;
+            .map_err(|e| {
+                ErrorResponse::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to modify ack deadline: {}", e),
+                )
+            })?;
     }
 
     Ok(StatusCode::OK)
@@ -1039,10 +1166,10 @@ async fn modify_ack_deadline(
 mod tests {
     use super::*;
     use crate::storage::memory::InMemoryBackend;
-    use axum::body::Body;
-    use axum::http::{Method, Request, StatusCode};
     use ::base64::Engine as _;
     use ::base64::engine::general_purpose;
+    use axum::body::Body;
+    use axum::http::{Method, Request, StatusCode};
     use tower::ServiceExt; // for oneshot()
 
     /// Create a test state with an in-memory backend.
@@ -1111,10 +1238,7 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(
-            response["name"],
-            "projects/test-project/topics/test-topic"
-        );
+        assert_eq!(response["name"], "projects/test-project/topics/test-topic");
         assert_eq!(response["labels"]["env"], "test");
     }
 
@@ -1134,10 +1258,12 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert!(response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("Invalid topic ID"));
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Invalid topic ID")
+        );
     }
 
     #[tokio::test]
@@ -1166,10 +1292,12 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::CONFLICT);
-        assert!(response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("already exists"));
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("already exists")
+        );
     }
 
     #[tokio::test]
@@ -1212,10 +1340,12 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::NOT_FOUND);
-        assert!(response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("not found"));
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("not found")
+        );
     }
 
     #[tokio::test]
@@ -1257,10 +1387,12 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::NOT_FOUND);
-        assert!(response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("not found"));
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("not found")
+        );
     }
 
     #[tokio::test]
@@ -1332,10 +1464,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let topics = response["topics"].as_array().unwrap();
         assert_eq!(topics.len(), 1);
-        assert!(topics[0]["name"]
-            .as_str()
-            .unwrap()
-            .contains("project-a"));
+        assert!(topics[0]["name"].as_str().unwrap().contains("project-a"));
     }
 
     #[tokio::test]
@@ -1394,10 +1523,12 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::NOT_FOUND);
-        assert!(response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("not found"));
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("not found")
+        );
     }
 
     #[tokio::test]
@@ -1472,10 +1603,7 @@ mod tests {
             response["name"],
             "projects/test-project/subscriptions/test-sub"
         );
-        assert_eq!(
-            response["topic"],
-            "projects/test-project/topics/sub-topic"
-        );
+        assert_eq!(response["topic"], "projects/test-project/topics/sub-topic");
         assert_eq!(response["ackDeadlineSeconds"], 30);
     }
 
@@ -1497,10 +1625,12 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert!(response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("Invalid subscription ID"));
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Invalid subscription ID")
+        );
     }
 
     #[tokio::test]
@@ -1520,10 +1650,12 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::NOT_FOUND);
-        assert!(response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("not found"));
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("not found")
+        );
     }
 
     #[tokio::test]
@@ -1543,10 +1675,12 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert!(response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("Invalid topic name"));
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Invalid topic name")
+        );
     }
 
     #[tokio::test]
@@ -1602,10 +1736,12 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::NOT_FOUND);
-        assert!(response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("not found"));
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("not found")
+        );
     }
 
     #[tokio::test]
@@ -1657,10 +1793,12 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::NOT_FOUND);
-        assert!(response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("not found"));
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("not found")
+        );
     }
 
     #[tokio::test]
@@ -1777,10 +1915,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let subs = response["subscriptions"].as_array().unwrap();
         assert_eq!(subs.len(), 1);
-        assert!(subs[0]["name"]
-            .as_str()
-            .unwrap()
-            .contains("project-a"));
+        assert!(subs[0]["name"].as_str().unwrap().contains("project-a"));
     }
 
     #[tokio::test]
@@ -1875,10 +2010,12 @@ mod tests {
         let received = response["receivedMessages"].as_array().unwrap();
         assert_eq!(received.len(), 1);
         assert!(!received[0]["ackId"].as_str().unwrap().is_empty());
-        assert!(!received[0]["message"]["messageId"]
-            .as_str()
-            .unwrap()
-            .is_empty());
+        assert!(
+            !received[0]["message"]["messageId"]
+                .as_str()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -2135,7 +2272,10 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(response["deadLetterPolicy"]["deadLetterTopic"], "projects/test/topics/dlq-topic");
+        assert_eq!(
+            response["deadLetterPolicy"]["deadLetterTopic"],
+            "projects/test/topics/dlq-topic"
+        );
         assert_eq!(response["deadLetterPolicy"]["maxDeliveryAttempts"], 5);
     }
 
@@ -2159,7 +2299,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_message_with_string_attributes() {
-        use crate::types::{Message, MessageId, MessageAttributeValue};
+        use crate::types::{Message, MessageAttributeValue, MessageId};
         use chrono::Utc;
         use std::collections::HashMap;
 
@@ -2243,9 +2383,8 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
         // Start server in background
-        let server_handle = tokio::spawn(async move {
-            start_rest_server(config, backend, shutdown_rx).await
-        });
+        let server_handle =
+            tokio::spawn(async move { start_rest_server(config, backend, shutdown_rx).await });
 
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -2254,10 +2393,7 @@ mod tests {
         let _ = shutdown_tx.send(());
 
         // Wait for graceful shutdown
-        let result = tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            server_handle
-        ).await;
+        let result = tokio::time::timeout(tokio::time::Duration::from_secs(5), server_handle).await;
 
         assert!(result.is_ok());
         assert!(result.unwrap().unwrap().is_ok());
@@ -2286,7 +2422,12 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::NOT_FOUND);
-        assert!(response["error"]["message"].as_str().unwrap().contains("Unknown topic action"));
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Unknown topic action")
+        );
     }
 
     #[tokio::test]
@@ -2298,7 +2439,9 @@ mod tests {
             .method(Method::POST)
             .uri("/v1/projects/test/topics/no-action-separator")
             .header("content-type", "application/json")
-            .body(Body::from(serde_json::to_vec(&serde_json::json!({})).unwrap()))
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({})).unwrap(),
+            ))
             .unwrap();
 
         let response = app.oneshot(request).await.unwrap();
@@ -2338,7 +2481,12 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::NOT_FOUND);
-        assert!(response["error"]["message"].as_str().unwrap().contains("Unknown subscription action"));
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Unknown subscription action")
+        );
     }
 
     #[tokio::test]
@@ -2350,7 +2498,9 @@ mod tests {
             .method(Method::POST)
             .uri("/v1/projects/test/subscriptions/no-action-separator")
             .header("content-type", "application/json")
-            .body(Body::from(serde_json::to_vec(&serde_json::json!({})).unwrap()))
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({})).unwrap(),
+            ))
             .unwrap();
 
         let response = app.oneshot(request).await.unwrap();

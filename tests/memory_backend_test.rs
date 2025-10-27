@@ -274,9 +274,11 @@ async fn test_memory_batch_operations() {
 
     // Verify all messages were received
     for i in 1..=10 {
-        assert!(received
-            .iter()
-            .any(|m| m.message.body == format!("Batch message {}", i)));
+        assert!(
+            received
+                .iter()
+                .any(|m| m.message.body == format!("Batch message {}", i))
+        );
     }
 }
 

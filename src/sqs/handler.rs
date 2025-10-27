@@ -8,17 +8,17 @@ use tracing::{debug, info};
 
 use crate::config::LclqConfig;
 use crate::sqs::{
-    build_change_message_visibility_response, build_change_visibility_batch_response,
-    build_create_queue_response, build_delete_message_batch_response,
-    build_delete_message_response, build_error_response, build_get_queue_attributes_response,
-    build_get_queue_url_response, build_list_queues_response, build_receive_message_response,
-    build_send_message_batch_response, build_send_message_response, build_tag_queue_response,
-    build_untag_queue_response, calculate_md5_of_attributes, calculate_md5_of_body, escape_xml,
-    extract_queue_name_from_url, BatchErrorEntry, BatchResultEntry, MessageAttributeInfo,
-    ReceivedMessageInfo, SqsAction, SqsErrorCode, SqsRequest,
+    BatchErrorEntry, BatchResultEntry, MessageAttributeInfo, ReceivedMessageInfo, SqsAction,
+    SqsErrorCode, SqsRequest, build_change_message_visibility_response,
+    build_change_visibility_batch_response, build_create_queue_response,
+    build_delete_message_batch_response, build_delete_message_response, build_error_response,
+    build_get_queue_attributes_response, build_get_queue_url_response, build_list_queues_response,
+    build_receive_message_response, build_send_message_batch_response, build_send_message_response,
+    build_tag_queue_response, build_untag_queue_response, calculate_md5_of_attributes,
+    calculate_md5_of_body, escape_xml, extract_queue_name_from_url,
 };
 use crate::storage::{QueueFilter, StorageBackend};
-use crate::types::validation::{validate_sqs_queue_name, SQS_MAX_MESSAGE_SIZE};
+use crate::types::validation::{SQS_MAX_MESSAGE_SIZE, validate_sqs_queue_name};
 use crate::types::{
     DlqConfig, Message, MessageAttributes, MessageId, QueueConfig, QueueType, ReceiveOptions,
 };
@@ -33,7 +33,10 @@ pub struct SqsHandler {
 impl SqsHandler {
     /// Create a new SQS handler.
     pub fn new(backend: Arc<dyn StorageBackend>, config: LclqConfig) -> Self {
-        let base_url = format!("http://{}:{}", config.server.bind_address, config.server.sqs_port);
+        let base_url = format!(
+            "http://{}:{}",
+            config.server.bind_address, config.server.sqs_port
+        );
         info!(base_url = %base_url, "SQS handler initialized");
         Self {
             backend,
@@ -57,8 +60,12 @@ impl SqsHandler {
             SqsAction::ReceiveMessage => self.handle_receive_message(request).await,
             SqsAction::DeleteMessage => self.handle_delete_message(request).await,
             SqsAction::DeleteMessageBatch => self.handle_delete_message_batch(request).await,
-            SqsAction::ChangeMessageVisibility => self.handle_change_message_visibility(request).await,
-            SqsAction::ChangeMessageVisibilityBatch => self.handle_change_message_visibility_batch(request).await,
+            SqsAction::ChangeMessageVisibility => {
+                self.handle_change_message_visibility(request).await
+            }
+            SqsAction::ChangeMessageVisibilityBatch => {
+                self.handle_change_message_visibility_batch(request).await
+            }
             SqsAction::PurgeQueue => self.handle_purge_queue(request).await,
             SqsAction::GetQueueAttributes => self.handle_get_queue_attributes(request).await,
             SqsAction::SetQueueAttributes => self.handle_set_queue_attributes(request).await,
@@ -95,7 +102,10 @@ impl SqsHandler {
 
         // Determine queue type
         let is_fifo = queue_name.ends_with(".fifo")
-            || attributes.get("FifoQueue").map(|v| v == "true").unwrap_or(false);
+            || attributes
+                .get("FifoQueue")
+                .map(|v| v == "true")
+                .unwrap_or(false);
 
         let queue_type = if is_fifo {
             QueueType::SqsFifo
@@ -169,7 +179,9 @@ impl SqsHandler {
                                     })
                                     .unwrap_or_default();
 
-                                Some(RedrivePermission::ByQueue { source_queue_arns: source_arns })
+                                Some(RedrivePermission::ByQueue {
+                                    source_queue_arns: source_arns,
+                                })
                             }
                             _ => None,
                         };
@@ -238,7 +250,10 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
@@ -287,7 +302,10 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
@@ -301,11 +319,10 @@ impl SqsHandler {
                 crate::types::MessageAttributeValue {
                     data_type: value.data_type.clone(),
                     string_value: value.string_value.clone(),
-                    binary_value: value.binary_value.as_ref().and_then(|b64| {
-                        base64::engine::general_purpose::STANDARD
-                            .decode(b64)
-                            .ok()
-                    }),
+                    binary_value: value
+                        .binary_value
+                        .as_ref()
+                        .and_then(|b64| base64::engine::general_purpose::STANDARD.decode(b64).ok()),
                 },
             );
         }
@@ -316,7 +333,9 @@ impl SqsHandler {
             .and_then(|v| v.parse().ok());
 
         let message_group_id = request.get_param("MessageGroupId").map(String::from);
-        let deduplication_id = request.get_param("MessageDeduplicationId").map(String::from);
+        let deduplication_id = request
+            .get_param("MessageDeduplicationId")
+            .map(String::from);
 
         let message = Message {
             id: MessageId::new(),
@@ -331,7 +350,11 @@ impl SqsHandler {
             delay_seconds,
         };
 
-        match self.backend.send_message(&queue_name, message.clone()).await {
+        match self
+            .backend
+            .send_message(&queue_name, message.clone())
+            .await
+        {
             Ok(sent_message) => {
                 let md5_of_body = calculate_md5_of_body(&sent_message.body);
                 let md5_of_attrs = if !sqs_attributes.is_empty() {
@@ -366,7 +389,10 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
@@ -422,7 +448,11 @@ impl SqsHandler {
             };
 
             // Send message
-            match self.backend.send_message(&queue_name, message.clone()).await {
+            match self
+                .backend
+                .send_message(&queue_name, message.clone())
+                .await
+            {
                 Ok(sent_message) => {
                     let md5_of_body = calculate_md5_of_body(&sent_message.body);
 
@@ -471,7 +501,10 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
@@ -513,7 +546,11 @@ impl SqsHandler {
                         ),
                         (
                             "SentTimestamp".to_string(),
-                            received.message.sent_timestamp.timestamp_millis().to_string(),
+                            received
+                                .message
+                                .sent_timestamp
+                                .timestamp_millis()
+                                .to_string(),
                         ),
                         (
                             "ApproximateReceiveCount".to_string(),
@@ -574,11 +611,18 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
-        match self.backend.delete_message(&queue_name, receipt_handle).await {
+        match self
+            .backend
+            .delete_message(&queue_name, receipt_handle)
+            .await
+        {
             Ok(_) => {
                 debug!(queue_name = %queue_name, "Message deleted");
                 build_delete_message_response()
@@ -600,7 +644,10 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
@@ -626,7 +673,11 @@ impl SqsHandler {
 
         // Process each entry
         for entry in entries {
-            match self.backend.delete_message(&queue_name, &entry.receipt_handle).await {
+            match self
+                .backend
+                .delete_message(&queue_name, &entry.receipt_handle)
+                .await
+            {
                 Ok(_) => {
                     successful_ids.push(entry.id.clone());
                     debug!(
@@ -675,7 +726,7 @@ impl SqsHandler {
                     return build_error_response(
                         SqsErrorCode::InvalidParameterValue,
                         "VisibilityTimeout must be between 0 and 43200 seconds",
-                    )
+                    );
                 }
             },
             Err(e) => return build_error_response(SqsErrorCode::MissingParameter, &e),
@@ -684,7 +735,10 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
@@ -718,7 +772,10 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
@@ -800,7 +857,10 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
@@ -823,7 +883,10 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
@@ -845,15 +908,13 @@ impl SqsHandler {
                 return build_error_response(
                     SqsErrorCode::QueueDoesNotExist,
                     "The specified queue does not exist",
-                )
+                );
             }
         };
 
         let stats = match self.backend.get_stats(&queue_name).await {
             Ok(s) => s,
-            Err(e) => {
-                return build_error_response(SqsErrorCode::InternalError, &e.to_string())
-            }
+            Err(e) => return build_error_response(SqsErrorCode::InternalError, &e.to_string()),
         };
 
         // Build attribute list
@@ -862,7 +923,13 @@ impl SqsHandler {
         for attr_name in &requested_attrs {
             match attr_name.parse::<crate::sqs::QueueAttribute>() {
                 Ok(attr) => {
-                    Self::add_queue_attribute(&mut attributes, &attr, &queue_config, &stats, request_all);
+                    Self::add_queue_attribute(
+                        &mut attributes,
+                        &attr,
+                        &queue_config,
+                        &stats,
+                        request_all,
+                    );
                 }
                 Err(_) => {
                     // Unknown attribute, ignore (AWS behavior)
@@ -884,7 +951,10 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
@@ -895,7 +965,7 @@ impl SqsHandler {
                 return build_error_response(
                     SqsErrorCode::QueueDoesNotExist,
                     "The specified queue does not exist",
-                )
+                );
             }
         };
 
@@ -905,58 +975,50 @@ impl SqsHandler {
         // Update modifiable attributes
         for (key, value) in attributes {
             match key.as_str() {
-                "VisibilityTimeout" => {
-                    match value.parse::<u32>() {
-                        Ok(timeout) if timeout <= 43200 => {
-                            queue_config.visibility_timeout = timeout;
-                        }
-                        _ => {
-                            return build_error_response(
-                                SqsErrorCode::InvalidParameterValue,
-                                "VisibilityTimeout must be between 0 and 43200 seconds",
-                            )
-                        }
+                "VisibilityTimeout" => match value.parse::<u32>() {
+                    Ok(timeout) if timeout <= 43200 => {
+                        queue_config.visibility_timeout = timeout;
                     }
-                }
-                "MessageRetentionPeriod" => {
-                    match value.parse::<u32>() {
-                        Ok(period) if (60..=1209600).contains(&period) => {
-                            queue_config.message_retention_period = period;
-                        }
-                        _ => {
-                            return build_error_response(
-                                SqsErrorCode::InvalidParameterValue,
-                                "MessageRetentionPeriod must be between 60 and 1209600 seconds",
-                            )
-                        }
+                    _ => {
+                        return build_error_response(
+                            SqsErrorCode::InvalidParameterValue,
+                            "VisibilityTimeout must be between 0 and 43200 seconds",
+                        );
                     }
-                }
-                "MaximumMessageSize" => {
-                    match value.parse::<usize>() {
-                        Ok(size) if (1024..=262144).contains(&size) => {
-                            queue_config.max_message_size = size;
-                        }
-                        _ => {
-                            return build_error_response(
-                                SqsErrorCode::InvalidParameterValue,
-                                "MaximumMessageSize must be between 1024 and 262144 bytes",
-                            )
-                        }
+                },
+                "MessageRetentionPeriod" => match value.parse::<u32>() {
+                    Ok(period) if (60..=1209600).contains(&period) => {
+                        queue_config.message_retention_period = period;
                     }
-                }
-                "DelaySeconds" => {
-                    match value.parse::<u32>() {
-                        Ok(delay) if delay <= 900 => {
-                            queue_config.delay_seconds = delay;
-                        }
-                        _ => {
-                            return build_error_response(
-                                SqsErrorCode::InvalidParameterValue,
-                                "DelaySeconds must be between 0 and 900 seconds",
-                            )
-                        }
+                    _ => {
+                        return build_error_response(
+                            SqsErrorCode::InvalidParameterValue,
+                            "MessageRetentionPeriod must be between 60 and 1209600 seconds",
+                        );
                     }
-                }
+                },
+                "MaximumMessageSize" => match value.parse::<usize>() {
+                    Ok(size) if (1024..=262144).contains(&size) => {
+                        queue_config.max_message_size = size;
+                    }
+                    _ => {
+                        return build_error_response(
+                            SqsErrorCode::InvalidParameterValue,
+                            "MaximumMessageSize must be between 1024 and 262144 bytes",
+                        );
+                    }
+                },
+                "DelaySeconds" => match value.parse::<u32>() {
+                    Ok(delay) if delay <= 900 => {
+                        queue_config.delay_seconds = delay;
+                    }
+                    _ => {
+                        return build_error_response(
+                            SqsErrorCode::InvalidParameterValue,
+                            "DelaySeconds must be between 0 and 900 seconds",
+                        );
+                    }
+                },
                 "ContentBasedDeduplication" => {
                     if queue_config.queue_type != QueueType::SqsFifo {
                         return build_error_response(
@@ -971,7 +1033,7 @@ impl SqsHandler {
                             return build_error_response(
                                 SqsErrorCode::InvalidParameterValue,
                                 "ContentBasedDeduplication must be 'true' or 'false'",
-                            )
+                            );
                         }
                     }
                 }
@@ -984,7 +1046,8 @@ impl SqsHandler {
 
                             if let (Some(arn), Some(max_count)) = (target_arn, max_receive_count) {
                                 // Extract queue name from ARN (format: arn:aws:sqs:region:account:queue-name)
-                                let target_queue_id = arn.split(':').next_back().unwrap_or(arn).to_string();
+                                let target_queue_id =
+                                    arn.split(':').next_back().unwrap_or(arn).to_string();
 
                                 queue_config.dlq_config = Some(DlqConfig {
                                     target_queue_id,
@@ -1001,7 +1064,7 @@ impl SqsHandler {
                             return build_error_response(
                                 SqsErrorCode::InvalidParameterValue,
                                 "Invalid RedrivePolicy JSON",
-                            )
+                            );
                         }
                     }
                 }
@@ -1025,12 +1088,16 @@ impl SqsHandler {
                                             .as_array()
                                             .map(|arr| {
                                                 arr.iter()
-                                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                                    .filter_map(|v| {
+                                                        v.as_str().map(|s| s.to_string())
+                                                    })
                                                     .collect::<Vec<String>>()
                                             })
                                             .unwrap_or_default();
 
-                                        RedrivePermission::ByQueue { source_queue_arns: source_arns }
+                                        RedrivePermission::ByQueue {
+                                            source_queue_arns: source_arns,
+                                        }
                                     }
                                     _ => {
                                         return build_error_response(
@@ -1040,7 +1107,8 @@ impl SqsHandler {
                                     }
                                 };
 
-                                queue_config.redrive_allow_policy = Some(RedriveAllowPolicy { permission });
+                                queue_config.redrive_allow_policy =
+                                    Some(RedriveAllowPolicy { permission });
                             } else {
                                 return build_error_response(
                                     SqsErrorCode::InvalidParameterValue,
@@ -1052,7 +1120,7 @@ impl SqsHandler {
                             return build_error_response(
                                 SqsErrorCode::InvalidParameterValue,
                                 "Invalid RedriveAllowPolicy JSON",
-                            )
+                            );
                         }
                     }
                 }
@@ -1089,7 +1157,10 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
@@ -1100,7 +1171,7 @@ impl SqsHandler {
                 return build_error_response(
                     SqsErrorCode::QueueDoesNotExist,
                     "The specified queue does not exist",
-                )
+                );
             }
         };
 
@@ -1110,7 +1181,10 @@ impl SqsHandler {
             let key_param = format!("Tag.{}.Key", i);
             let value_param = format!("Tag.{}.Value", i);
 
-            match (request.get_param(&key_param), request.get_param(&value_param)) {
+            match (
+                request.get_param(&key_param),
+                request.get_param(&value_param),
+            ) {
                 (Some(key), Some(value)) => {
                     queue_config.tags.insert(key.to_string(), value.to_string());
                     i += 1;
@@ -1138,7 +1212,10 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
@@ -1149,7 +1226,7 @@ impl SqsHandler {
                 return build_error_response(
                     SqsErrorCode::QueueDoesNotExist,
                     "The specified queue does not exist",
-                )
+                );
             }
         };
 
@@ -1186,7 +1263,10 @@ impl SqsHandler {
         let queue_name = match extract_queue_name_from_url(queue_url) {
             Some(name) => name,
             None => {
-                return build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid QueueUrl")
+                return build_error_response(
+                    SqsErrorCode::InvalidParameterValue,
+                    "Invalid QueueUrl",
+                );
             }
         };
 
@@ -1197,7 +1277,7 @@ impl SqsHandler {
                 return build_error_response(
                     SqsErrorCode::QueueDoesNotExist,
                     "The specified queue does not exist",
-                )
+                );
             }
         };
 
@@ -1238,48 +1318,135 @@ impl SqsHandler {
         match attr {
             QueueAttribute::All => {
                 // Add all attributes
-                Self::add_queue_attribute(attributes, &QueueAttribute::VisibilityTimeout, queue_config, stats, false);
-                Self::add_queue_attribute(attributes, &QueueAttribute::DelaySeconds, queue_config, stats, false);
-                Self::add_queue_attribute(attributes, &QueueAttribute::MaximumMessageSize, queue_config, stats, false);
-                Self::add_queue_attribute(attributes, &QueueAttribute::MessageRetentionPeriod, queue_config, stats, false);
-                Self::add_queue_attribute(attributes, &QueueAttribute::ApproximateNumberOfMessages, queue_config, stats, false);
-                Self::add_queue_attribute(attributes, &QueueAttribute::ApproximateNumberOfMessagesNotVisible, queue_config, stats, false);
-                Self::add_queue_attribute(attributes, &QueueAttribute::QueueArn, queue_config, stats, false);
+                Self::add_queue_attribute(
+                    attributes,
+                    &QueueAttribute::VisibilityTimeout,
+                    queue_config,
+                    stats,
+                    false,
+                );
+                Self::add_queue_attribute(
+                    attributes,
+                    &QueueAttribute::DelaySeconds,
+                    queue_config,
+                    stats,
+                    false,
+                );
+                Self::add_queue_attribute(
+                    attributes,
+                    &QueueAttribute::MaximumMessageSize,
+                    queue_config,
+                    stats,
+                    false,
+                );
+                Self::add_queue_attribute(
+                    attributes,
+                    &QueueAttribute::MessageRetentionPeriod,
+                    queue_config,
+                    stats,
+                    false,
+                );
+                Self::add_queue_attribute(
+                    attributes,
+                    &QueueAttribute::ApproximateNumberOfMessages,
+                    queue_config,
+                    stats,
+                    false,
+                );
+                Self::add_queue_attribute(
+                    attributes,
+                    &QueueAttribute::ApproximateNumberOfMessagesNotVisible,
+                    queue_config,
+                    stats,
+                    false,
+                );
+                Self::add_queue_attribute(
+                    attributes,
+                    &QueueAttribute::QueueArn,
+                    queue_config,
+                    stats,
+                    false,
+                );
 
                 if queue_config.queue_type == crate::types::QueueType::SqsFifo {
-                    Self::add_queue_attribute(attributes, &QueueAttribute::FifoQueue, queue_config, stats, false);
-                    Self::add_queue_attribute(attributes, &QueueAttribute::ContentBasedDeduplication, queue_config, stats, false);
+                    Self::add_queue_attribute(
+                        attributes,
+                        &QueueAttribute::FifoQueue,
+                        queue_config,
+                        stats,
+                        false,
+                    );
+                    Self::add_queue_attribute(
+                        attributes,
+                        &QueueAttribute::ContentBasedDeduplication,
+                        queue_config,
+                        stats,
+                        false,
+                    );
                 }
 
                 if queue_config.dlq_config.is_some() {
-                    Self::add_queue_attribute(attributes, &QueueAttribute::RedrivePolicy, queue_config, stats, false);
+                    Self::add_queue_attribute(
+                        attributes,
+                        &QueueAttribute::RedrivePolicy,
+                        queue_config,
+                        stats,
+                        false,
+                    );
                 }
 
                 if queue_config.redrive_allow_policy.is_some() {
-                    Self::add_queue_attribute(attributes, &QueueAttribute::RedriveAllowPolicy, queue_config, stats, false);
+                    Self::add_queue_attribute(
+                        attributes,
+                        &QueueAttribute::RedriveAllowPolicy,
+                        queue_config,
+                        stats,
+                        false,
+                    );
                 }
             }
             QueueAttribute::VisibilityTimeout => {
-                attributes.push(("VisibilityTimeout".to_string(), queue_config.visibility_timeout.to_string()));
+                attributes.push((
+                    "VisibilityTimeout".to_string(),
+                    queue_config.visibility_timeout.to_string(),
+                ));
             }
             QueueAttribute::DelaySeconds => {
-                attributes.push(("DelaySeconds".to_string(), queue_config.delay_seconds.to_string()));
+                attributes.push((
+                    "DelaySeconds".to_string(),
+                    queue_config.delay_seconds.to_string(),
+                ));
             }
             QueueAttribute::MaximumMessageSize => {
-                attributes.push(("MaximumMessageSize".to_string(), queue_config.max_message_size.to_string()));
+                attributes.push((
+                    "MaximumMessageSize".to_string(),
+                    queue_config.max_message_size.to_string(),
+                ));
             }
             QueueAttribute::MessageRetentionPeriod => {
-                attributes.push(("MessageRetentionPeriod".to_string(), queue_config.message_retention_period.to_string()));
+                attributes.push((
+                    "MessageRetentionPeriod".to_string(),
+                    queue_config.message_retention_period.to_string(),
+                ));
             }
             QueueAttribute::ApproximateNumberOfMessages => {
-                attributes.push(("ApproximateNumberOfMessages".to_string(), stats.available_messages.to_string()));
+                attributes.push((
+                    "ApproximateNumberOfMessages".to_string(),
+                    stats.available_messages.to_string(),
+                ));
             }
             QueueAttribute::ApproximateNumberOfMessagesNotVisible => {
-                attributes.push(("ApproximateNumberOfMessagesNotVisible".to_string(), stats.in_flight_messages.to_string()));
+                attributes.push((
+                    "ApproximateNumberOfMessagesNotVisible".to_string(),
+                    stats.in_flight_messages.to_string(),
+                ));
             }
             QueueAttribute::ApproximateNumberOfMessagesDelayed => {
                 // TODO: Track delayed messages separately
-                attributes.push(("ApproximateNumberOfMessagesDelayed".to_string(), "0".to_string()));
+                attributes.push((
+                    "ApproximateNumberOfMessagesDelayed".to_string(),
+                    "0".to_string(),
+                ));
             }
             QueueAttribute::QueueArn => {
                 // Generate a fake ARN (local development)
@@ -1291,7 +1458,10 @@ impl SqsHandler {
                 attributes.push(("FifoQueue".to_string(), is_fifo.to_string()));
             }
             QueueAttribute::ContentBasedDeduplication => {
-                attributes.push(("ContentBasedDeduplication".to_string(), queue_config.content_based_deduplication.to_string()));
+                attributes.push((
+                    "ContentBasedDeduplication".to_string(),
+                    queue_config.content_based_deduplication.to_string(),
+                ));
             }
             QueueAttribute::RedrivePolicy => {
                 if let Some(dlq) = &queue_config.dlq_config {
@@ -1436,10 +1606,14 @@ fn xml_to_json_response(xml: &str) -> String {
                 // Extract MessageAttributes
                 let mut message_attributes = serde_json::Map::new();
                 let mut msg_attr_pos = 0;
-                while let Some(msg_attr_start) = msg_xml[msg_attr_pos..].find("<MessageAttribute>") {
+                while let Some(msg_attr_start) = msg_xml[msg_attr_pos..].find("<MessageAttribute>")
+                {
                     let abs_msg_attr_start = msg_attr_pos + msg_attr_start;
-                    if let Some(msg_attr_end_rel) = msg_xml[abs_msg_attr_start..].find("</MessageAttribute>") {
-                        let msg_attr_xml = &msg_xml[abs_msg_attr_start..abs_msg_attr_start + msg_attr_end_rel + 19];
+                    if let Some(msg_attr_end_rel) =
+                        msg_xml[abs_msg_attr_start..].find("</MessageAttribute>")
+                    {
+                        let msg_attr_xml = &msg_xml
+                            [abs_msg_attr_start..abs_msg_attr_start + msg_attr_end_rel + 19];
 
                         // Extract Name
                         if let Some(name_start) = msg_attr_xml.find("<Name>") {
@@ -1461,7 +1635,8 @@ fn xml_to_json_response(xml: &str) -> String {
                                 if let Some(sv_start) = msg_attr_xml.find("<StringValue>") {
                                     if let Some(sv_end) = msg_attr_xml.find("</StringValue>") {
                                         let string_value = &msg_attr_xml[sv_start + 13..sv_end];
-                                        value_obj.insert("StringValue".to_string(), json!(string_value));
+                                        value_obj
+                                            .insert("StringValue".to_string(), json!(string_value));
                                     }
                                 }
 
@@ -1469,7 +1644,8 @@ fn xml_to_json_response(xml: &str) -> String {
                                 if let Some(bv_start) = msg_attr_xml.find("<BinaryValue>") {
                                     if let Some(bv_end) = msg_attr_xml.find("</BinaryValue>") {
                                         let binary_value = &msg_attr_xml[bv_start + 13..bv_end];
-                                        value_obj.insert("BinaryValue".to_string(), json!(binary_value));
+                                        value_obj
+                                            .insert("BinaryValue".to_string(), json!(binary_value));
                                     }
                                 }
 
@@ -1675,13 +1851,19 @@ fn xml_to_json_response(xml: &str) -> String {
 
                 if let Some(mid_start) = entry_xml.find("<MessageId>") {
                     if let Some(mid_end) = entry_xml.find("</MessageId>") {
-                        entry.insert("MessageId".to_string(), json!(&entry_xml[mid_start + 11..mid_end]));
+                        entry.insert(
+                            "MessageId".to_string(),
+                            json!(&entry_xml[mid_start + 11..mid_end]),
+                        );
                     }
                 }
 
                 if let Some(md5_start) = entry_xml.find("<MD5OfMessageBody>") {
                     if let Some(md5_end) = entry_xml.find("</MD5OfMessageBody>") {
-                        entry.insert("MD5OfMessageBody".to_string(), json!(&entry_xml[md5_start + 18..md5_end]));
+                        entry.insert(
+                            "MD5OfMessageBody".to_string(),
+                            json!(&entry_xml[md5_start + 18..md5_end]),
+                        );
                     }
                 }
 
@@ -1708,13 +1890,19 @@ fn xml_to_json_response(xml: &str) -> String {
 
                 if let Some(code_start) = entry_xml.find("<Code>") {
                     if let Some(code_end) = entry_xml.find("</Code>") {
-                        entry.insert("Code".to_string(), json!(&entry_xml[code_start + 6..code_end]));
+                        entry.insert(
+                            "Code".to_string(),
+                            json!(&entry_xml[code_start + 6..code_end]),
+                        );
                     }
                 }
 
                 if let Some(msg_start) = entry_xml.find("<Message>") {
                     if let Some(msg_end) = entry_xml.find("</Message>") {
-                        entry.insert("Message".to_string(), json!(&entry_xml[msg_start + 9..msg_end]));
+                        entry.insert(
+                            "Message".to_string(),
+                            json!(&entry_xml[msg_start + 9..msg_end]),
+                        );
                     }
                 }
 
@@ -1739,8 +1927,11 @@ fn xml_to_json_response(xml: &str) -> String {
     }
 
     // For DeleteMessageBatch and ChangeMessageVisibilityBatch - collect successful and failed entries
-    if xml.contains("DeleteMessageBatchResponse") || xml.contains("DeleteMessageBatchResult")
-        || xml.contains("ChangeMessageVisibilityBatchResponse") || xml.contains("ChangeMessageVisibilityBatchResult") {
+    if xml.contains("DeleteMessageBatchResponse")
+        || xml.contains("DeleteMessageBatchResult")
+        || xml.contains("ChangeMessageVisibilityBatchResponse")
+        || xml.contains("ChangeMessageVisibilityBatchResult")
+    {
         let mut successful = Vec::new();
         let mut failed = Vec::new();
         let mut pos = 0;
@@ -1790,13 +1981,19 @@ fn xml_to_json_response(xml: &str) -> String {
 
                 if let Some(code_start) = entry_xml.find("<Code>") {
                     if let Some(code_end) = entry_xml.find("</Code>") {
-                        entry.insert("Code".to_string(), json!(&entry_xml[code_start + 6..code_end]));
+                        entry.insert(
+                            "Code".to_string(),
+                            json!(&entry_xml[code_start + 6..code_end]),
+                        );
                     }
                 }
 
                 if let Some(msg_start) = entry_xml.find("<Message>") {
                     if let Some(msg_end) = entry_xml.find("</Message>") {
-                        entry.insert("Message".to_string(), json!(&entry_xml[msg_start + 9..msg_end]));
+                        entry.insert(
+                            "Message".to_string(),
+                            json!(&entry_xml[msg_start + 9..msg_end]),
+                        );
                     }
                 }
 
@@ -1893,7 +2090,10 @@ mod tests {
 
         // Tag the queue
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-queue".to_string(),
+        );
         params.insert("Tag.1.Key".to_string(), "Environment".to_string());
         params.insert("Tag.1.Value".to_string(), "Test".to_string());
         params.insert("Tag.2.Key".to_string(), "Owner".to_string());
@@ -1937,7 +2137,10 @@ mod tests {
         let handler = create_test_handler();
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/nonexistent".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/nonexistent".to_string(),
+        );
         params.insert("Tag.1.Key".to_string(), "Environment".to_string());
         params.insert("Tag.1.Value".to_string(), "Test".to_string());
 
@@ -1964,7 +2167,10 @@ mod tests {
         create_test_queue(&handler, "test-queue-untag").await;
 
         let mut tag_params = HashMap::new();
-        tag_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-untag".to_string());
+        tag_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-queue-untag".to_string(),
+        );
         tag_params.insert("Tag.1.Key".to_string(), "Environment".to_string());
         tag_params.insert("Tag.1.Value".to_string(), "Test".to_string());
 
@@ -1978,7 +2184,10 @@ mod tests {
 
         // Now untag
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-untag".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-queue-untag".to_string(),
+        );
         params.insert("TagKey.1".to_string(), "Environment".to_string());
 
         let request = SqsRequest {
@@ -2025,7 +2234,10 @@ mod tests {
         create_test_queue(&handler, "test-queue-list-tags").await;
 
         let mut tag_params = HashMap::new();
-        tag_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-list-tags".to_string());
+        tag_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-queue-list-tags".to_string(),
+        );
         tag_params.insert("Tag.1.Key".to_string(), "Environment".to_string());
         tag_params.insert("Tag.1.Value".to_string(), "Production".to_string());
         tag_params.insert("Tag.2.Key".to_string(), "Team".to_string());
@@ -2041,7 +2253,10 @@ mod tests {
 
         // List tags
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-list-tags".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-queue-list-tags".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::ListQueueTags,
@@ -2067,7 +2282,10 @@ mod tests {
         create_test_queue(&handler, "test-queue-no-tags").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-no-tags".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-queue-no-tags".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::ListQueueTags,
@@ -2111,7 +2329,10 @@ mod tests {
         create_test_queue(&handler, "test-queue-visibility").await;
 
         let mut send_params = HashMap::new();
-        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-visibility".to_string());
+        send_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-queue-visibility".to_string(),
+        );
         send_params.insert("MessageBody".to_string(), "Test message".to_string());
 
         let send_request = SqsRequest {
@@ -2124,7 +2345,10 @@ mod tests {
 
         // Receive the message to get a receipt handle
         let mut receive_params = HashMap::new();
-        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-visibility".to_string());
+        receive_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-queue-visibility".to_string(),
+        );
         receive_params.insert("MaxNumberOfMessages".to_string(), "1".to_string());
 
         let receive_request = SqsRequest {
@@ -2142,7 +2366,10 @@ mod tests {
 
                 // Change visibility timeout
                 let mut params = HashMap::new();
-                params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-visibility".to_string());
+                params.insert(
+                    "QueueUrl".to_string(),
+                    "http://127.0.0.1:9324/queue/test-queue-visibility".to_string(),
+                );
                 params.insert("ReceiptHandle".to_string(), receipt_handle.to_string());
                 params.insert("VisibilityTimeout".to_string(), "60".to_string());
 
@@ -2168,7 +2395,10 @@ mod tests {
         create_test_queue(&handler, "test-queue-vis-error").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-vis-error".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-queue-vis-error".to_string(),
+        );
         params.insert("VisibilityTimeout".to_string(), "60".to_string());
 
         let request = SqsRequest {
@@ -2195,11 +2425,26 @@ mod tests {
         create_test_queue(&handler, "test-queue-batch-vis").await;
 
         let mut send_params = HashMap::new();
-        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-batch-vis".to_string());
-        send_params.insert("SendMessageBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
-        send_params.insert("SendMessageBatchRequestEntry.1.MessageBody".to_string(), "Message 1".to_string());
-        send_params.insert("SendMessageBatchRequestEntry.2.Id".to_string(), "msg2".to_string());
-        send_params.insert("SendMessageBatchRequestEntry.2.MessageBody".to_string(), "Message 2".to_string());
+        send_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-queue-batch-vis".to_string(),
+        );
+        send_params.insert(
+            "SendMessageBatchRequestEntry.1.Id".to_string(),
+            "msg1".to_string(),
+        );
+        send_params.insert(
+            "SendMessageBatchRequestEntry.1.MessageBody".to_string(),
+            "Message 1".to_string(),
+        );
+        send_params.insert(
+            "SendMessageBatchRequestEntry.2.Id".to_string(),
+            "msg2".to_string(),
+        );
+        send_params.insert(
+            "SendMessageBatchRequestEntry.2.MessageBody".to_string(),
+            "Message 2".to_string(),
+        );
 
         let send_request = SqsRequest {
             action: SqsAction::SendMessageBatch,
@@ -2211,7 +2456,10 @@ mod tests {
 
         // Receive messages
         let mut receive_params = HashMap::new();
-        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-batch-vis".to_string());
+        receive_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-queue-batch-vis".to_string(),
+        );
         receive_params.insert("MaxNumberOfMessages".to_string(), "10".to_string());
 
         let receive_request = SqsRequest {
@@ -2239,13 +2487,34 @@ mod tests {
         if receipt_handles.len() >= 2 {
             // Change visibility batch
             let mut params = HashMap::new();
-            params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue-batch-vis".to_string());
-            params.insert("ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(), "entry1".to_string());
-            params.insert("ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(), receipt_handles[0].clone());
-            params.insert("ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(), "30".to_string());
-            params.insert("ChangeMessageVisibilityBatchRequestEntry.2.Id".to_string(), "entry2".to_string());
-            params.insert("ChangeMessageVisibilityBatchRequestEntry.2.ReceiptHandle".to_string(), receipt_handles[1].clone());
-            params.insert("ChangeMessageVisibilityBatchRequestEntry.2.VisibilityTimeout".to_string(), "60".to_string());
+            params.insert(
+                "QueueUrl".to_string(),
+                "http://127.0.0.1:9324/queue/test-queue-batch-vis".to_string(),
+            );
+            params.insert(
+                "ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(),
+                "entry1".to_string(),
+            );
+            params.insert(
+                "ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(),
+                receipt_handles[0].clone(),
+            );
+            params.insert(
+                "ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(),
+                "30".to_string(),
+            );
+            params.insert(
+                "ChangeMessageVisibilityBatchRequestEntry.2.Id".to_string(),
+                "entry2".to_string(),
+            );
+            params.insert(
+                "ChangeMessageVisibilityBatchRequestEntry.2.ReceiptHandle".to_string(),
+                receipt_handles[1].clone(),
+            );
+            params.insert(
+                "ChangeMessageVisibilityBatchRequestEntry.2.VisibilityTimeout".to_string(),
+                "60".to_string(),
+            );
 
             let request = SqsRequest {
                 action: SqsAction::ChangeMessageVisibilityBatch,
@@ -2266,9 +2535,18 @@ mod tests {
         let handler = create_test_handler();
 
         let mut params = HashMap::new();
-        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(), "entry1".to_string());
-        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(), "dummy-handle".to_string());
-        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(), "30".to_string());
+        params.insert(
+            "ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(),
+            "entry1".to_string(),
+        );
+        params.insert(
+            "ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(),
+            "dummy-handle".to_string(),
+        );
+        params.insert(
+            "ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(),
+            "30".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::ChangeMessageVisibilityBatch,
@@ -2365,7 +2643,10 @@ mod tests {
 
         // Delete the queue
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-queue".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-delete-queue".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::DeleteQueue,
@@ -2415,7 +2696,10 @@ mod tests {
 
         // Send a message
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-send-queue".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-send-queue".to_string(),
+        );
         params.insert("MessageBody".to_string(), "Hello, SQS!".to_string());
 
         let request = SqsRequest {
@@ -2442,11 +2726,26 @@ mod tests {
 
         // Send batch messages
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-send-batch-queue".to_string());
-        params.insert("SendMessageBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
-        params.insert("SendMessageBatchRequestEntry.1.MessageBody".to_string(), "Message 1".to_string());
-        params.insert("SendMessageBatchRequestEntry.2.Id".to_string(), "msg2".to_string());
-        params.insert("SendMessageBatchRequestEntry.2.MessageBody".to_string(), "Message 2".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-send-batch-queue".to_string(),
+        );
+        params.insert(
+            "SendMessageBatchRequestEntry.1.Id".to_string(),
+            "msg1".to_string(),
+        );
+        params.insert(
+            "SendMessageBatchRequestEntry.1.MessageBody".to_string(),
+            "Message 1".to_string(),
+        );
+        params.insert(
+            "SendMessageBatchRequestEntry.2.Id".to_string(),
+            "msg2".to_string(),
+        );
+        params.insert(
+            "SendMessageBatchRequestEntry.2.MessageBody".to_string(),
+            "Message 2".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::SendMessageBatch,
@@ -2470,18 +2769,26 @@ mod tests {
         create_test_queue(&handler, "test-receive-queue").await;
 
         let mut send_params = HashMap::new();
-        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-receive-queue".to_string());
+        send_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-receive-queue".to_string(),
+        );
         send_params.insert("MessageBody".to_string(), "Test message".to_string());
 
-        handler.handle_request(SqsRequest {
-            action: SqsAction::SendMessage,
-            params: send_params,
-            is_json: false,
-        }).await;
+        handler
+            .handle_request(SqsRequest {
+                action: SqsAction::SendMessage,
+                params: send_params,
+                is_json: false,
+            })
+            .await;
 
         // Receive the message
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-receive-queue".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-receive-queue".to_string(),
+        );
         params.insert("MaxNumberOfMessages".to_string(), "1".to_string());
 
         let request = SqsRequest {
@@ -2507,23 +2814,33 @@ mod tests {
         create_test_queue(&handler, "test-delete-msg-queue").await;
 
         let mut send_params = HashMap::new();
-        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-msg-queue".to_string());
+        send_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-delete-msg-queue".to_string(),
+        );
         send_params.insert("MessageBody".to_string(), "Delete me".to_string());
 
-        handler.handle_request(SqsRequest {
-            action: SqsAction::SendMessage,
-            params: send_params,
-            is_json: false,
-        }).await;
+        handler
+            .handle_request(SqsRequest {
+                action: SqsAction::SendMessage,
+                params: send_params,
+                is_json: false,
+            })
+            .await;
 
         let mut receive_params = HashMap::new();
-        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-msg-queue".to_string());
+        receive_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-delete-msg-queue".to_string(),
+        );
 
-        let (receive_response, _) = handler.handle_request(SqsRequest {
-            action: SqsAction::ReceiveMessage,
-            params: receive_params,
-            is_json: false,
-        }).await;
+        let (receive_response, _) = handler
+            .handle_request(SqsRequest {
+                action: SqsAction::ReceiveMessage,
+                params: receive_params,
+                is_json: false,
+            })
+            .await;
 
         // Extract receipt handle (simple parsing)
         let receipt_start = receive_response.find("<ReceiptHandle>").unwrap() + 15;
@@ -2532,7 +2849,10 @@ mod tests {
 
         // Delete the message
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-msg-queue".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-delete-msg-queue".to_string(),
+        );
         params.insert("ReceiptHandle".to_string(), receipt_handle.to_string());
 
         let request = SqsRequest {
@@ -2556,18 +2876,26 @@ mod tests {
         create_test_queue(&handler, "test-purge-queue").await;
 
         let mut send_params = HashMap::new();
-        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-purge-queue".to_string());
+        send_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-purge-queue".to_string(),
+        );
         send_params.insert("MessageBody".to_string(), "Message to purge".to_string());
 
-        handler.handle_request(SqsRequest {
-            action: SqsAction::SendMessage,
-            params: send_params,
-            is_json: false,
-        }).await;
+        handler
+            .handle_request(SqsRequest {
+                action: SqsAction::SendMessage,
+                params: send_params,
+                is_json: false,
+            })
+            .await;
 
         // Purge the queue
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-purge-queue".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-purge-queue".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::PurgeQueue,
@@ -2591,7 +2919,10 @@ mod tests {
 
         // Get queue attributes
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-getattrs-queue".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-getattrs-queue".to_string(),
+        );
         params.insert("AttributeName.1".to_string(), "All".to_string());
 
         let request = SqsRequest {
@@ -2617,7 +2948,10 @@ mod tests {
 
         // Set queue attributes
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-setattrs-queue".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-setattrs-queue".to_string(),
+        );
         params.insert("Attribute.VisibilityTimeout".to_string(), "60".to_string());
 
         let request = SqsRequest {
@@ -2642,26 +2976,36 @@ mod tests {
 
         for i in 1..=2 {
             let mut send_params = HashMap::new();
-            send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-batch-queue".to_string());
+            send_params.insert(
+                "QueueUrl".to_string(),
+                "http://127.0.0.1:9324/queue/test-delete-batch-queue".to_string(),
+            );
             send_params.insert("MessageBody".to_string(), format!("Message {}", i));
 
-            handler.handle_request(SqsRequest {
-                action: SqsAction::SendMessage,
-                params: send_params,
-                is_json: false,
-            }).await;
+            handler
+                .handle_request(SqsRequest {
+                    action: SqsAction::SendMessage,
+                    params: send_params,
+                    is_json: false,
+                })
+                .await;
         }
 
         // Receive messages
         let mut receive_params = HashMap::new();
-        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-batch-queue".to_string());
+        receive_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-delete-batch-queue".to_string(),
+        );
         receive_params.insert("MaxNumberOfMessages".to_string(), "10".to_string());
 
-        let (receive_response, _) = handler.handle_request(SqsRequest {
-            action: SqsAction::ReceiveMessage,
-            params: receive_params,
-            is_json: false,
-        }).await;
+        let (receive_response, _) = handler
+            .handle_request(SqsRequest {
+                action: SqsAction::ReceiveMessage,
+                params: receive_params,
+                is_json: false,
+            })
+            .await;
 
         // Extract receipt handles (simple parsing - get first two)
         let receipt_handles: Vec<String> = receive_response
@@ -2669,7 +3013,10 @@ mod tests {
             .take(2)
             .map(|(start, _)| {
                 let content_start = start + 15;
-                let content_end = receive_response[content_start..].find("</ReceiptHandle>").unwrap() + content_start;
+                let content_end = receive_response[content_start..]
+                    .find("</ReceiptHandle>")
+                    .unwrap()
+                    + content_start;
                 receive_response[content_start..content_end].to_string()
             })
             .collect();
@@ -2677,11 +3024,26 @@ mod tests {
         if receipt_handles.len() >= 2 {
             // Delete messages in batch
             let mut params = HashMap::new();
-            params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-batch-queue".to_string());
-            params.insert("DeleteMessageBatchRequestEntry.1.Id".to_string(), "entry1".to_string());
-            params.insert("DeleteMessageBatchRequestEntry.1.ReceiptHandle".to_string(), receipt_handles[0].clone());
-            params.insert("DeleteMessageBatchRequestEntry.2.Id".to_string(), "entry2".to_string());
-            params.insert("DeleteMessageBatchRequestEntry.2.ReceiptHandle".to_string(), receipt_handles[1].clone());
+            params.insert(
+                "QueueUrl".to_string(),
+                "http://127.0.0.1:9324/queue/test-delete-batch-queue".to_string(),
+            );
+            params.insert(
+                "DeleteMessageBatchRequestEntry.1.Id".to_string(),
+                "entry1".to_string(),
+            );
+            params.insert(
+                "DeleteMessageBatchRequestEntry.1.ReceiptHandle".to_string(),
+                receipt_handles[0].clone(),
+            );
+            params.insert(
+                "DeleteMessageBatchRequestEntry.2.Id".to_string(),
+                "entry2".to_string(),
+            );
+            params.insert(
+                "DeleteMessageBatchRequestEntry.2.ReceiptHandle".to_string(),
+                receipt_handles[1].clone(),
+            );
 
             let request = SqsRequest {
                 action: SqsAction::DeleteMessageBatch,
@@ -2731,8 +3093,10 @@ mod tests {
 
         let mut params = HashMap::new();
         params.insert("QueueName".to_string(), "queue-with-rap".to_string());
-        params.insert("Attribute.RedriveAllowPolicy".to_string(),
-            r#"{"redrivePermission":"allowAll"}"#.to_string());
+        params.insert(
+            "Attribute.RedriveAllowPolicy".to_string(),
+            r#"{"redrivePermission":"allowAll"}"#.to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::CreateQueue,
@@ -2772,8 +3136,14 @@ mod tests {
         create_test_queue(&handler, "test-attrs-queue").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-attrs-queue".to_string());
-        params.insert("AttributeName.1".to_string(), "VisibilityTimeout".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-attrs-queue".to_string(),
+        );
+        params.insert(
+            "AttributeName.1".to_string(),
+            "VisibilityTimeout".to_string(),
+        );
         params.insert("AttributeName.2".to_string(), "DelaySeconds".to_string());
 
         let request = SqsRequest {
@@ -2814,8 +3184,14 @@ mod tests {
         create_test_queue(&handler, "test-set-retention").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-set-retention".to_string());
-        params.insert("Attribute.MessageRetentionPeriod".to_string(), "86400".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-set-retention".to_string(),
+        );
+        params.insert(
+            "Attribute.MessageRetentionPeriod".to_string(),
+            "86400".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::SetQueueAttributes,
@@ -2833,8 +3209,14 @@ mod tests {
         create_test_queue(&handler, "test-invalid-vis").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-invalid-vis".to_string());
-        params.insert("Attribute.1.Name".to_string(), "VisibilityTimeout".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-invalid-vis".to_string(),
+        );
+        params.insert(
+            "Attribute.1.Name".to_string(),
+            "VisibilityTimeout".to_string(),
+        );
         params.insert("Attribute.1.Value".to_string(), "99999".to_string());
 
         let request = SqsRequest {
@@ -2854,8 +3236,14 @@ mod tests {
         create_test_queue(&handler, "test-invalid-retention").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-invalid-retention".to_string());
-        params.insert("Attribute.1.Name".to_string(), "MessageRetentionPeriod".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-invalid-retention".to_string(),
+        );
+        params.insert(
+            "Attribute.1.Name".to_string(),
+            "MessageRetentionPeriod".to_string(),
+        );
         params.insert("Attribute.1.Value".to_string(), "30".to_string()); // Too short
 
         let request = SqsRequest {
@@ -2874,8 +3262,14 @@ mod tests {
         create_test_queue(&handler, "test-standard-queue").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-standard-queue".to_string());
-        params.insert("Attribute.1.Name".to_string(), "ContentBasedDeduplication".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-standard-queue".to_string(),
+        );
+        params.insert(
+            "Attribute.1.Name".to_string(),
+            "ContentBasedDeduplication".to_string(),
+        );
         params.insert("Attribute.1.Value".to_string(), "true".to_string());
 
         let request = SqsRequest {
@@ -2917,7 +3311,10 @@ mod tests {
         create_test_queue(&handler, "test-queue").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-queue".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-queue".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::SendMessage,
@@ -2936,7 +3333,10 @@ mod tests {
         create_test_queue(&handler, "test-batch-empty").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-batch-empty".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-batch-empty".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::SendMessageBatch,
@@ -2955,7 +3355,10 @@ mod tests {
         create_test_queue(&handler, "test-delete-missing").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-delete-missing".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-delete-missing".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::DeleteMessage,
@@ -2974,7 +3377,10 @@ mod tests {
         create_test_queue(&handler, "test-change-vis").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-change-vis".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-change-vis".to_string(),
+        );
         params.insert("ReceiptHandle".to_string(), "dummy-handle".to_string());
 
         let request = SqsRequest {
@@ -2994,7 +3400,10 @@ mod tests {
         create_test_queue(&handler, "test-change-batch-empty").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-change-batch-empty".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-change-batch-empty".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::ChangeMessageVisibilityBatch,
@@ -3035,7 +3444,10 @@ mod tests {
         create_test_queue(&handler, "test-json-send").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-send".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-json-send".to_string(),
+        );
         params.insert("MessageBody".to_string(), "JSON test message".to_string());
 
         let request = SqsRequest {
@@ -3057,17 +3469,25 @@ mod tests {
 
         // Send a message first
         let mut send_params = HashMap::new();
-        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-receive".to_string());
+        send_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-json-receive".to_string(),
+        );
         send_params.insert("MessageBody".to_string(), "JSON receive test".to_string());
-        handler.handle_request(SqsRequest {
-            action: SqsAction::SendMessage,
-            params: send_params,
-            is_json: false,
-        }).await;
+        handler
+            .handle_request(SqsRequest {
+                action: SqsAction::SendMessage,
+                params: send_params,
+                is_json: false,
+            })
+            .await;
 
         // Receive with JSON response
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-receive".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-json-receive".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::ReceiveMessage,
@@ -3105,7 +3525,10 @@ mod tests {
         create_test_queue(&handler, "test-json-getattrs").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-getattrs".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-json-getattrs".to_string(),
+        );
         params.insert("AttributeName.1".to_string(), "All".to_string());
 
         let request = SqsRequest {
@@ -3126,21 +3549,31 @@ mod tests {
 
         // Send and receive a message to get receipt handle
         let mut send_params = HashMap::new();
-        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-delete".to_string());
+        send_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-json-delete".to_string(),
+        );
         send_params.insert("MessageBody".to_string(), "Delete me".to_string());
-        handler.handle_request(SqsRequest {
-            action: SqsAction::SendMessage,
-            params: send_params,
-            is_json: false,
-        }).await;
+        handler
+            .handle_request(SqsRequest {
+                action: SqsAction::SendMessage,
+                params: send_params,
+                is_json: false,
+            })
+            .await;
 
         let mut receive_params = HashMap::new();
-        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-delete".to_string());
-        let (receive_response, _) = handler.handle_request(SqsRequest {
-            action: SqsAction::ReceiveMessage,
-            params: receive_params,
-            is_json: false,
-        }).await;
+        receive_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-json-delete".to_string(),
+        );
+        let (receive_response, _) = handler
+            .handle_request(SqsRequest {
+                action: SqsAction::ReceiveMessage,
+                params: receive_params,
+                is_json: false,
+            })
+            .await;
 
         let receipt_start = receive_response.find("<ReceiptHandle>").unwrap() + 15;
         let receipt_end = receive_response.find("</ReceiptHandle>").unwrap();
@@ -3148,7 +3581,10 @@ mod tests {
 
         // Delete with JSON response
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-delete".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-json-delete".to_string(),
+        );
         params.insert("ReceiptHandle".to_string(), receipt_handle.to_string());
 
         let request = SqsRequest {
@@ -3169,11 +3605,26 @@ mod tests {
         create_test_queue(&handler, "test-json-batch").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-json-batch".to_string());
-        params.insert("SendMessageBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
-        params.insert("SendMessageBatchRequestEntry.1.MessageBody".to_string(), "Message 1".to_string());
-        params.insert("SendMessageBatchRequestEntry.2.Id".to_string(), "msg2".to_string());
-        params.insert("SendMessageBatchRequestEntry.2.MessageBody".to_string(), "Message 2".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-json-batch".to_string(),
+        );
+        params.insert(
+            "SendMessageBatchRequestEntry.1.Id".to_string(),
+            "msg1".to_string(),
+        );
+        params.insert(
+            "SendMessageBatchRequestEntry.1.MessageBody".to_string(),
+            "Message 1".to_string(),
+        );
+        params.insert(
+            "SendMessageBatchRequestEntry.2.Id".to_string(),
+            "msg2".to_string(),
+        );
+        params.insert(
+            "SendMessageBatchRequestEntry.2.MessageBody".to_string(),
+            "Message 2".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::SendMessageBatch,
@@ -3196,9 +3647,15 @@ mod tests {
         create_test_queue(&handler, "test-invalid-redrive-json").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-invalid-redrive-json".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-invalid-redrive-json".to_string(),
+        );
         params.insert("Attribute.1.Name".to_string(), "RedrivePolicy".to_string());
-        params.insert("Attribute.1.Value".to_string(), "invalid json here".to_string());
+        params.insert(
+            "Attribute.1.Value".to_string(),
+            "invalid json here".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::SetQueueAttributes,
@@ -3217,10 +3674,16 @@ mod tests {
         create_test_queue(&handler, "test-invalid-redrive-format").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-invalid-redrive-format".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-invalid-redrive-format".to_string(),
+        );
         params.insert("Attribute.1.Name".to_string(), "RedrivePolicy".to_string());
         // Missing deadLetterTargetArn field
-        params.insert("Attribute.1.Value".to_string(), r#"{"maxReceiveCount":"5"}"#.to_string());
+        params.insert(
+            "Attribute.1.Value".to_string(),
+            r#"{"maxReceiveCount":"5"}"#.to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::SetQueueAttributes,
@@ -3239,9 +3702,18 @@ mod tests {
         create_test_queue(&handler, "test-invalid-rap-json").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-invalid-rap-json".to_string());
-        params.insert("Attribute.1.Name".to_string(), "RedriveAllowPolicy".to_string());
-        params.insert("Attribute.1.Value".to_string(), "not valid json".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-invalid-rap-json".to_string(),
+        );
+        params.insert(
+            "Attribute.1.Name".to_string(),
+            "RedriveAllowPolicy".to_string(),
+        );
+        params.insert(
+            "Attribute.1.Value".to_string(),
+            "not valid json".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::SetQueueAttributes,
@@ -3260,9 +3732,18 @@ mod tests {
         create_test_queue(&handler, "test-invalid-rap-perm").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-invalid-rap-perm".to_string());
-        params.insert("Attribute.1.Name".to_string(), "RedriveAllowPolicy".to_string());
-        params.insert("Attribute.1.Value".to_string(), r#"{"redrivePermission":"invalidValue"}"#.to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-invalid-rap-perm".to_string(),
+        );
+        params.insert(
+            "Attribute.1.Name".to_string(),
+            "RedriveAllowPolicy".to_string(),
+        );
+        params.insert(
+            "Attribute.1.Value".to_string(),
+            r#"{"redrivePermission":"invalidValue"}"#.to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::SetQueueAttributes,
@@ -3281,9 +3762,18 @@ mod tests {
         create_test_queue(&handler, "test-missing-rap-perm").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-missing-rap-perm".to_string());
-        params.insert("Attribute.1.Name".to_string(), "RedriveAllowPolicy".to_string());
-        params.insert("Attribute.1.Value".to_string(), r#"{"somethingElse":"value"}"#.to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-missing-rap-perm".to_string(),
+        );
+        params.insert(
+            "Attribute.1.Name".to_string(),
+            "RedriveAllowPolicy".to_string(),
+        );
+        params.insert(
+            "Attribute.1.Value".to_string(),
+            r#"{"somethingElse":"value"}"#.to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::SetQueueAttributes,
@@ -3308,9 +3798,18 @@ mod tests {
         let large_body = "x".repeat(300_000); // Exceeds SQS_MAX_MESSAGE_SIZE
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-batch-too-large".to_string());
-        params.insert("SendMessageBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
-        params.insert("SendMessageBatchRequestEntry.1.MessageBody".to_string(), large_body);
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-batch-too-large".to_string(),
+        );
+        params.insert(
+            "SendMessageBatchRequestEntry.1.Id".to_string(),
+            "msg1".to_string(),
+        );
+        params.insert(
+            "SendMessageBatchRequestEntry.1.MessageBody".to_string(),
+            large_body,
+        );
 
         let request = SqsRequest {
             action: SqsAction::SendMessageBatch,
@@ -3334,8 +3833,14 @@ mod tests {
         let handler = create_test_handler();
 
         let mut params = HashMap::new();
-        params.insert("QueueName".to_string(), "test-create-invalid-rap".to_string());
-        params.insert("Attribute.RedriveAllowPolicy".to_string(), "not valid json".to_string());
+        params.insert(
+            "QueueName".to_string(),
+            "test-create-invalid-rap".to_string(),
+        );
+        params.insert(
+            "Attribute.RedriveAllowPolicy".to_string(),
+            "not valid json".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::CreateQueue,
@@ -3355,7 +3860,10 @@ mod tests {
 
         let mut params = HashMap::new();
         params.insert("QueueName".to_string(), "test-create-rap-deny".to_string());
-        params.insert("Attribute.RedriveAllowPolicy".to_string(), r#"{"redrivePermission":"denyAll"}"#.to_string());
+        params.insert(
+            "Attribute.RedriveAllowPolicy".to_string(),
+            r#"{"redrivePermission":"denyAll"}"#.to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::CreateQueue,
@@ -3373,7 +3881,10 @@ mod tests {
         let handler = create_test_handler();
 
         let mut params = HashMap::new();
-        params.insert("QueueName".to_string(), "test-create-rap-byqueue".to_string());
+        params.insert(
+            "QueueName".to_string(),
+            "test-create-rap-byqueue".to_string(),
+        );
         params.insert("Attribute.RedriveAllowPolicy".to_string(),
             r#"{"redrivePermission":"byQueue","sourceQueueArns":["arn:aws:sqs:us-east-1:123456789012:source-queue"]}"#.to_string());
 
@@ -3398,11 +3909,26 @@ mod tests {
         create_test_queue(&handler, "test-binary-attr").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-binary-attr".to_string());
-        params.insert("MessageBody".to_string(), "Message with binary attr".to_string());
-        params.insert("MessageAttribute.1.Name".to_string(), "BinaryData".to_string());
-        params.insert("MessageAttribute.1.Value.DataType".to_string(), "Binary".to_string());
-        params.insert("MessageAttribute.1.Value.BinaryValue".to_string(), "aGVsbG8=".to_string()); // base64 "hello"
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-binary-attr".to_string(),
+        );
+        params.insert(
+            "MessageBody".to_string(),
+            "Message with binary attr".to_string(),
+        );
+        params.insert(
+            "MessageAttribute.1.Name".to_string(),
+            "BinaryData".to_string(),
+        );
+        params.insert(
+            "MessageAttribute.1.Value.DataType".to_string(),
+            "Binary".to_string(),
+        );
+        params.insert(
+            "MessageAttribute.1.Value.BinaryValue".to_string(),
+            "aGVsbG8=".to_string(),
+        ); // base64 "hello"
 
         let request = SqsRequest {
             action: SqsAction::SendMessage,
@@ -3422,21 +3948,38 @@ mod tests {
 
         // Send a message with attributes
         let mut send_params = HashMap::new();
-        send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-receive-attrs".to_string());
+        send_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-receive-attrs".to_string(),
+        );
         send_params.insert("MessageBody".to_string(), "Test message".to_string());
-        send_params.insert("MessageAttribute.1.Name".to_string(), "TestAttr".to_string());
-        send_params.insert("MessageAttribute.1.Value.DataType".to_string(), "String".to_string());
-        send_params.insert("MessageAttribute.1.Value.StringValue".to_string(), "TestValue".to_string());
+        send_params.insert(
+            "MessageAttribute.1.Name".to_string(),
+            "TestAttr".to_string(),
+        );
+        send_params.insert(
+            "MessageAttribute.1.Value.DataType".to_string(),
+            "String".to_string(),
+        );
+        send_params.insert(
+            "MessageAttribute.1.Value.StringValue".to_string(),
+            "TestValue".to_string(),
+        );
 
-        handler.handle_request(SqsRequest {
-            action: SqsAction::SendMessage,
-            params: send_params,
-            is_json: false,
-        }).await;
+        handler
+            .handle_request(SqsRequest {
+                action: SqsAction::SendMessage,
+                params: send_params,
+                is_json: false,
+            })
+            .await;
 
         // Receive the message
         let mut receive_params = HashMap::new();
-        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-receive-attrs".to_string());
+        receive_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-receive-attrs".to_string(),
+        );
         receive_params.insert("MaxNumberOfMessages".to_string(), "1".to_string());
 
         let request = SqsRequest {
@@ -3458,8 +4001,14 @@ mod tests {
         create_test_queue(&handler, "test-set-rap-byqueue").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-set-rap-byqueue".to_string());
-        params.insert("Attribute.1.Name".to_string(), "RedriveAllowPolicy".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-set-rap-byqueue".to_string(),
+        );
+        params.insert(
+            "Attribute.1.Name".to_string(),
+            "RedriveAllowPolicy".to_string(),
+        );
         params.insert("Attribute.1.Value".to_string(),
             r#"{"redrivePermission":"byQueue","sourceQueueArns":["arn:aws:sqs:us-east-1:123456789012:source1","arn:aws:sqs:us-east-1:123456789012:source2"]}"#.to_string());
 
@@ -3479,9 +4028,18 @@ mod tests {
         create_test_queue(&handler, "test-set-rap-deny").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-set-rap-deny".to_string());
-        params.insert("Attribute.1.Name".to_string(), "RedriveAllowPolicy".to_string());
-        params.insert("Attribute.1.Value".to_string(), r#"{"redrivePermission":"denyAll"}"#.to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-set-rap-deny".to_string(),
+        );
+        params.insert(
+            "Attribute.1.Name".to_string(),
+            "RedriveAllowPolicy".to_string(),
+        );
+        params.insert(
+            "Attribute.1.Value".to_string(),
+            r#"{"redrivePermission":"denyAll"}"#.to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::SetQueueAttributes,
@@ -3503,9 +4061,18 @@ mod tests {
         create_test_queue(&handler, "test-del-batch-invalid").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-del-batch-invalid".to_string());
-        params.insert("DeleteMessageBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
-        params.insert("DeleteMessageBatchRequestEntry.1.ReceiptHandle".to_string(), "invalid-receipt-handle".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-del-batch-invalid".to_string(),
+        );
+        params.insert(
+            "DeleteMessageBatchRequestEntry.1.Id".to_string(),
+            "msg1".to_string(),
+        );
+        params.insert(
+            "DeleteMessageBatchRequestEntry.1.ReceiptHandle".to_string(),
+            "invalid-receipt-handle".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::DeleteMessageBatch,
@@ -3525,10 +4092,22 @@ mod tests {
         create_test_queue(&handler, "test-vis-batch-invalid").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-vis-batch-invalid".to_string());
-        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
-        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(), "dummy-handle".to_string());
-        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(), "99999".to_string()); // Too large
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-vis-batch-invalid".to_string(),
+        );
+        params.insert(
+            "ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(),
+            "msg1".to_string(),
+        );
+        params.insert(
+            "ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(),
+            "dummy-handle".to_string(),
+        );
+        params.insert(
+            "ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(),
+            "99999".to_string(),
+        ); // Too large
 
         let request = SqsRequest {
             action: SqsAction::ChangeMessageVisibilityBatch,
@@ -3548,10 +4127,22 @@ mod tests {
         create_test_queue(&handler, "test-vis-batch-invalid-rec").await;
 
         let mut params = HashMap::new();
-        params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-vis-batch-invalid-rec".to_string());
-        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
-        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(), "invalid-receipt".to_string());
-        params.insert("ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(), "30".to_string());
+        params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-vis-batch-invalid-rec".to_string(),
+        );
+        params.insert(
+            "ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(),
+            "msg1".to_string(),
+        );
+        params.insert(
+            "ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(),
+            "invalid-receipt".to_string(),
+        );
+        params.insert(
+            "ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(),
+            "30".to_string(),
+        );
 
         let request = SqsRequest {
             action: SqsAction::ChangeMessageVisibilityBatch,
@@ -3577,25 +4168,35 @@ mod tests {
         // Send and receive messages
         for i in 1..=2 {
             let mut send_params = HashMap::new();
-            send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-del-batch-json".to_string());
+            send_params.insert(
+                "QueueUrl".to_string(),
+                "http://127.0.0.1:9324/queue/test-del-batch-json".to_string(),
+            );
             send_params.insert("MessageBody".to_string(), format!("Message {}", i));
-            handler.handle_request(SqsRequest {
-                action: SqsAction::SendMessage,
-                params: send_params,
-                is_json: false,
-            }).await;
+            handler
+                .handle_request(SqsRequest {
+                    action: SqsAction::SendMessage,
+                    params: send_params,
+                    is_json: false,
+                })
+                .await;
         }
 
         // Receive messages
         let mut receive_params = HashMap::new();
-        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-del-batch-json".to_string());
+        receive_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-del-batch-json".to_string(),
+        );
         receive_params.insert("MaxNumberOfMessages".to_string(), "10".to_string());
 
-        let (receive_response, _) = handler.handle_request(SqsRequest {
-            action: SqsAction::ReceiveMessage,
-            params: receive_params,
-            is_json: false,
-        }).await;
+        let (receive_response, _) = handler
+            .handle_request(SqsRequest {
+                action: SqsAction::ReceiveMessage,
+                params: receive_params,
+                is_json: false,
+            })
+            .await;
 
         // Extract receipt handles
         let receipt_handles: Vec<String> = receive_response
@@ -3603,7 +4204,10 @@ mod tests {
             .take(2)
             .map(|(start, _)| {
                 let content_start = start + 15;
-                let content_end = receive_response[content_start..].find("</ReceiptHandle>").unwrap() + content_start;
+                let content_end = receive_response[content_start..]
+                    .find("</ReceiptHandle>")
+                    .unwrap()
+                    + content_start;
                 receive_response[content_start..content_end].to_string()
             })
             .collect();
@@ -3611,11 +4215,26 @@ mod tests {
         if receipt_handles.len() >= 2 {
             // Delete in batch with JSON response
             let mut params = HashMap::new();
-            params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-del-batch-json".to_string());
-            params.insert("DeleteMessageBatchRequestEntry.1.Id".to_string(), "entry1".to_string());
-            params.insert("DeleteMessageBatchRequestEntry.1.ReceiptHandle".to_string(), receipt_handles[0].clone());
-            params.insert("DeleteMessageBatchRequestEntry.2.Id".to_string(), "entry2".to_string());
-            params.insert("DeleteMessageBatchRequestEntry.2.ReceiptHandle".to_string(), receipt_handles[1].clone());
+            params.insert(
+                "QueueUrl".to_string(),
+                "http://127.0.0.1:9324/queue/test-del-batch-json".to_string(),
+            );
+            params.insert(
+                "DeleteMessageBatchRequestEntry.1.Id".to_string(),
+                "entry1".to_string(),
+            );
+            params.insert(
+                "DeleteMessageBatchRequestEntry.1.ReceiptHandle".to_string(),
+                receipt_handles[0].clone(),
+            );
+            params.insert(
+                "DeleteMessageBatchRequestEntry.2.Id".to_string(),
+                "entry2".to_string(),
+            );
+            params.insert(
+                "DeleteMessageBatchRequestEntry.2.ReceiptHandle".to_string(),
+                receipt_handles[1].clone(),
+            );
 
             let request = SqsRequest {
                 action: SqsAction::DeleteMessageBatch,
@@ -3637,25 +4256,35 @@ mod tests {
         // Send and receive messages
         for i in 1..=2 {
             let mut send_params = HashMap::new();
-            send_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-vis-batch-json".to_string());
+            send_params.insert(
+                "QueueUrl".to_string(),
+                "http://127.0.0.1:9324/queue/test-vis-batch-json".to_string(),
+            );
             send_params.insert("MessageBody".to_string(), format!("Message {}", i));
-            handler.handle_request(SqsRequest {
-                action: SqsAction::SendMessage,
-                params: send_params,
-                is_json: false,
-            }).await;
+            handler
+                .handle_request(SqsRequest {
+                    action: SqsAction::SendMessage,
+                    params: send_params,
+                    is_json: false,
+                })
+                .await;
         }
 
         // Receive messages
         let mut receive_params = HashMap::new();
-        receive_params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-vis-batch-json".to_string());
+        receive_params.insert(
+            "QueueUrl".to_string(),
+            "http://127.0.0.1:9324/queue/test-vis-batch-json".to_string(),
+        );
         receive_params.insert("MaxNumberOfMessages".to_string(), "10".to_string());
 
-        let (receive_response, _) = handler.handle_request(SqsRequest {
-            action: SqsAction::ReceiveMessage,
-            params: receive_params,
-            is_json: false,
-        }).await;
+        let (receive_response, _) = handler
+            .handle_request(SqsRequest {
+                action: SqsAction::ReceiveMessage,
+                params: receive_params,
+                is_json: false,
+            })
+            .await;
 
         // Extract receipt handles
         let receipt_handles: Vec<String> = receive_response
@@ -3663,7 +4292,10 @@ mod tests {
             .take(2)
             .map(|(start, _)| {
                 let content_start = start + 15;
-                let content_end = receive_response[content_start..].find("</ReceiptHandle>").unwrap() + content_start;
+                let content_end = receive_response[content_start..]
+                    .find("</ReceiptHandle>")
+                    .unwrap()
+                    + content_start;
                 receive_response[content_start..content_end].to_string()
             })
             .collect();
@@ -3671,13 +4303,34 @@ mod tests {
         if receipt_handles.len() >= 2 {
             // Change visibility in batch with JSON response
             let mut params = HashMap::new();
-            params.insert("QueueUrl".to_string(), "http://127.0.0.1:9324/queue/test-vis-batch-json".to_string());
-            params.insert("ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(), "entry1".to_string());
-            params.insert("ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(), receipt_handles[0].clone());
-            params.insert("ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(), "30".to_string());
-            params.insert("ChangeMessageVisibilityBatchRequestEntry.2.Id".to_string(), "entry2".to_string());
-            params.insert("ChangeMessageVisibilityBatchRequestEntry.2.ReceiptHandle".to_string(), receipt_handles[1].clone());
-            params.insert("ChangeMessageVisibilityBatchRequestEntry.2.VisibilityTimeout".to_string(), "60".to_string());
+            params.insert(
+                "QueueUrl".to_string(),
+                "http://127.0.0.1:9324/queue/test-vis-batch-json".to_string(),
+            );
+            params.insert(
+                "ChangeMessageVisibilityBatchRequestEntry.1.Id".to_string(),
+                "entry1".to_string(),
+            );
+            params.insert(
+                "ChangeMessageVisibilityBatchRequestEntry.1.ReceiptHandle".to_string(),
+                receipt_handles[0].clone(),
+            );
+            params.insert(
+                "ChangeMessageVisibilityBatchRequestEntry.1.VisibilityTimeout".to_string(),
+                "30".to_string(),
+            );
+            params.insert(
+                "ChangeMessageVisibilityBatchRequestEntry.2.Id".to_string(),
+                "entry2".to_string(),
+            );
+            params.insert(
+                "ChangeMessageVisibilityBatchRequestEntry.2.ReceiptHandle".to_string(),
+                receipt_handles[1].clone(),
+            );
+            params.insert(
+                "ChangeMessageVisibilityBatchRequestEntry.2.VisibilityTimeout".to_string(),
+                "60".to_string(),
+            );
 
             let request = SqsRequest {
                 action: SqsAction::ChangeMessageVisibilityBatch,
@@ -3691,6 +4344,3 @@ mod tests {
         }
     }
 }
-
-
-

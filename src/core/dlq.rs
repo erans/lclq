@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use tracing::{debug, info};
 
+use crate::Result;
 use crate::storage::StorageBackend;
 use crate::types::{DlqConfig, Message, QueueConfig};
-use crate::Result;
 
 /// Dead Letter Queue handler.
 pub struct DlqHandler {
@@ -20,11 +20,7 @@ impl DlqHandler {
     }
 
     /// Check if a message should be moved to the DLQ based on receive count.
-    pub async fn should_move_to_dlq(
-        &self,
-        message: &Message,
-        queue_config: &QueueConfig,
-    ) -> bool {
+    pub async fn should_move_to_dlq(&self, message: &Message, queue_config: &QueueConfig) -> bool {
         if let Some(dlq_config) = &queue_config.dlq_config {
             if message.receive_count >= dlq_config.max_receive_count {
                 debug!(
@@ -287,7 +283,10 @@ mod tests {
         // Message exceeding max receive count
         let message = create_test_message(5);
 
-        let moved = handler.process_message(&message, &queue_config).await.unwrap();
+        let moved = handler
+            .process_message(&message, &queue_config)
+            .await
+            .unwrap();
 
         assert!(moved); // Should return true
         let stats = backend.get_stats("process-dlq").await.unwrap();
@@ -326,7 +325,10 @@ mod tests {
         // Message below max receive count
         let message = create_test_message(2);
 
-        let moved = handler.process_message(&message, &queue_config).await.unwrap();
+        let moved = handler
+            .process_message(&message, &queue_config)
+            .await
+            .unwrap();
 
         assert!(!moved); // Should return false
         let stats = backend.get_stats("process-dlq2").await.unwrap();
@@ -343,7 +345,10 @@ mod tests {
         // Even with high receive count, should not move without DLQ config
         let message = create_test_message(100);
 
-        let moved = handler.process_message(&message, &queue_config).await.unwrap();
+        let moved = handler
+            .process_message(&message, &queue_config)
+            .await
+            .unwrap();
 
         assert!(!moved);
     }

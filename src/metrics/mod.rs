@@ -9,8 +9,8 @@
 
 use once_cell::sync::Lazy;
 use prometheus::{
-    Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts,
-    Registry, TextEncoder,
+    Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry,
+    TextEncoder,
 };
 use std::sync::Arc;
 use tracing::error;
@@ -110,8 +110,11 @@ impl Metrics {
 
         // Histogram metrics
         let send_latency_seconds = HistogramVec::new(
-            HistogramOpts::new("lclq_send_latency_seconds", "Send message latency in seconds")
-                .buckets(vec![0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0]),
+            HistogramOpts::new(
+                "lclq_send_latency_seconds",
+                "Send message latency in seconds",
+            )
+            .buckets(vec![0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0]),
             &["backend"],
         )
         .expect("Failed to create send_latency_seconds metric");
@@ -135,7 +138,10 @@ impl Metrics {
 
         // Gauge metrics
         let queue_depth = IntGaugeVec::new(
-            Opts::new("lclq_queue_depth", "Current number of available messages in queue"),
+            Opts::new(
+                "lclq_queue_depth",
+                "Current number of available messages in queue",
+            ),
             &["queue_id", "queue_name"],
         )
         .expect("Failed to create queue_depth metric");
@@ -260,32 +266,38 @@ mod tests {
         let metrics = get_metrics();
 
         // Test messages_sent_total (line 33)
-        metrics.messages_sent_total
+        metrics
+            .messages_sent_total
             .with_label_values(&["q1", "queue1", "sqs"])
             .inc();
 
         // Test messages_received_total (line 35)
-        metrics.messages_received_total
+        metrics
+            .messages_received_total
             .with_label_values(&["q1", "queue1", "sqs"])
             .inc();
 
         // Test messages_deleted_total (line 37)
-        metrics.messages_deleted_total
+        metrics
+            .messages_deleted_total
             .with_label_values(&["q1", "queue1"])
             .inc();
 
         // Test messages_to_dlq_total (line 39)
-        metrics.messages_to_dlq_total
+        metrics
+            .messages_to_dlq_total
             .with_label_values(&["q1", "queue1"])
             .inc();
 
         // Test backend_errors_total (line 41)
-        metrics.backend_errors_total
+        metrics
+            .backend_errors_total
             .with_label_values(&["memory", "send"])
             .inc();
 
         // Test api_requests_total (line 43)
-        metrics.api_requests_total
+        metrics
+            .api_requests_total
             .with_label_values(&["sqs", "POST", "/", "200"])
             .inc();
     }
@@ -295,17 +307,20 @@ mod tests {
         let metrics = get_metrics();
 
         // Test send_latency_seconds (line 46)
-        metrics.send_latency_seconds
+        metrics
+            .send_latency_seconds
             .with_label_values(&["memory"])
             .observe(0.05);
 
         // Test receive_latency_seconds (line 48)
-        metrics.receive_latency_seconds
+        metrics
+            .receive_latency_seconds
             .with_label_values(&["memory"])
             .observe(0.02);
 
         // Test api_latency_seconds (line 50)
-        metrics.api_latency_seconds
+        metrics
+            .api_latency_seconds
             .with_label_values(&["sqs", "/send"])
             .observe(0.01);
     }
@@ -315,12 +330,14 @@ mod tests {
         let metrics = get_metrics();
 
         // Test queue_depth (line 53)
-        metrics.queue_depth
+        metrics
+            .queue_depth
             .with_label_values(&["q1", "queue1"])
             .set(100);
 
         // Test in_flight_messages (line 55)
-        metrics.in_flight_messages
+        metrics
+            .in_flight_messages
             .with_label_values(&["q1", "queue1"])
             .set(10);
 
@@ -328,7 +345,8 @@ mod tests {
         metrics.queue_count.set(5);
 
         // Test active_connections (line 59)
-        metrics.active_connections
+        metrics
+            .active_connections
             .with_label_values(&["sqs"])
             .set(3);
     }

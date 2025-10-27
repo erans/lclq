@@ -1,7 +1,7 @@
 //! Validation functions for queue names, topic IDs, and other parameters.
 
-use crate::error::ValidationError;
 use crate::Result;
+use crate::error::ValidationError;
 
 /// SQS queue name validation (1-80 chars, alphanumeric + - and _).
 pub fn validate_sqs_queue_name(name: &str) -> Result<()> {
@@ -65,7 +65,14 @@ pub fn validate_pubsub_topic_id(topic_id: &str) -> Result<()> {
     }
 
     for ch in topic_id.chars() {
-        if !ch.is_alphanumeric() && ch != '-' && ch != '_' && ch != '.' && ch != '~' && ch != '+' && ch != '%' {
+        if !ch.is_alphanumeric()
+            && ch != '-'
+            && ch != '_'
+            && ch != '.'
+            && ch != '~'
+            && ch != '+'
+            && ch != '%'
+        {
             return Err(ValidationError::InvalidTopicId(format!(
                 "Topic ID contains invalid character: '{}'",
                 ch
@@ -98,7 +105,14 @@ pub fn validate_pubsub_subscription_id(subscription_id: &str) -> Result<()> {
     }
 
     for ch in subscription_id.chars() {
-        if !ch.is_alphanumeric() && ch != '-' && ch != '_' && ch != '.' && ch != '~' && ch != '+' && ch != '%' {
+        if !ch.is_alphanumeric()
+            && ch != '-'
+            && ch != '_'
+            && ch != '.'
+            && ch != '~'
+            && ch != '+'
+            && ch != '%'
+        {
             return Err(ValidationError::InvalidSubscriptionId(format!(
                 "Subscription ID contains invalid character: '{}'",
                 ch
@@ -113,9 +127,11 @@ pub fn validate_pubsub_subscription_id(subscription_id: &str) -> Result<()> {
 /// Validate message size (SQS: 256KB, Pub/Sub: 10MB).
 pub fn validate_message_size(size: usize, max_size: usize) -> Result<()> {
     if size > max_size {
-        return Err(
-            ValidationError::MessageTooLarge { size, max: max_size }.into()
-        );
+        return Err(ValidationError::MessageTooLarge {
+            size,
+            max: max_size,
+        }
+        .into());
     }
     Ok(())
 }
@@ -338,7 +354,9 @@ mod tests {
         assert!(validate_message_size(PUBSUB_MAX_MESSAGE_SIZE, PUBSUB_MAX_MESSAGE_SIZE).is_ok());
 
         // One byte over Pub/Sub limit
-        assert!(validate_message_size(PUBSUB_MAX_MESSAGE_SIZE + 1, PUBSUB_MAX_MESSAGE_SIZE).is_err());
+        assert!(
+            validate_message_size(PUBSUB_MAX_MESSAGE_SIZE + 1, PUBSUB_MAX_MESSAGE_SIZE).is_err()
+        );
 
         // Very large message
         assert!(validate_message_size(100_000_000, PUBSUB_MAX_MESSAGE_SIZE).is_err());

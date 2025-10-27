@@ -160,9 +160,7 @@ impl FromStr for QueueAttribute {
             "ApproximateNumberOfMessagesNotVisible" => {
                 Ok(Self::ApproximateNumberOfMessagesNotVisible)
             }
-            "ApproximateNumberOfMessagesDelayed" => {
-                Ok(Self::ApproximateNumberOfMessagesDelayed)
-            }
+            "ApproximateNumberOfMessagesDelayed" => Ok(Self::ApproximateNumberOfMessagesDelayed),
             "CreatedTimestamp" => Ok(Self::CreatedTimestamp),
             "LastModifiedTimestamp" => Ok(Self::LastModifiedTimestamp),
             "VisibilityTimeout" => Ok(Self::VisibilityTimeout),
@@ -185,9 +183,7 @@ impl QueueAttribute {
         match self {
             Self::All => "All",
             Self::ApproximateNumberOfMessages => "ApproximateNumberOfMessages",
-            Self::ApproximateNumberOfMessagesNotVisible => {
-                "ApproximateNumberOfMessagesNotVisible"
-            }
+            Self::ApproximateNumberOfMessagesNotVisible => "ApproximateNumberOfMessagesNotVisible",
             Self::ApproximateNumberOfMessagesDelayed => "ApproximateNumberOfMessagesDelayed",
             Self::CreatedTimestamp => "CreatedTimestamp",
             Self::LastModifiedTimestamp => "LastModifiedTimestamp",
@@ -363,30 +359,87 @@ mod tests {
         assert_eq!(SqsAction::ReceiveMessage.as_str(), "ReceiveMessage");
         assert_eq!(SqsAction::DeleteMessage.as_str(), "DeleteMessage");
         assert_eq!(SqsAction::DeleteMessageBatch.as_str(), "DeleteMessageBatch");
-        assert_eq!(SqsAction::ChangeMessageVisibility.as_str(), "ChangeMessageVisibility");
-        assert_eq!(SqsAction::ChangeMessageVisibilityBatch.as_str(), "ChangeMessageVisibilityBatch");
+        assert_eq!(
+            SqsAction::ChangeMessageVisibility.as_str(),
+            "ChangeMessageVisibility"
+        );
+        assert_eq!(
+            SqsAction::ChangeMessageVisibilityBatch.as_str(),
+            "ChangeMessageVisibilityBatch"
+        );
     }
 
     #[test]
     fn test_sqs_action_from_str_all_variants() {
         // Test all action variants parsing
-        assert_eq!("CreateQueue".parse::<SqsAction>().unwrap(), SqsAction::CreateQueue);
-        assert_eq!("DeleteQueue".parse::<SqsAction>().unwrap(), SqsAction::DeleteQueue);
-        assert_eq!("GetQueueUrl".parse::<SqsAction>().unwrap(), SqsAction::GetQueueUrl);
-        assert_eq!("GetQueueAttributes".parse::<SqsAction>().unwrap(), SqsAction::GetQueueAttributes);
-        assert_eq!("SetQueueAttributes".parse::<SqsAction>().unwrap(), SqsAction::SetQueueAttributes);
-        assert_eq!("ListQueues".parse::<SqsAction>().unwrap(), SqsAction::ListQueues);
-        assert_eq!("PurgeQueue".parse::<SqsAction>().unwrap(), SqsAction::PurgeQueue);
-        assert_eq!("TagQueue".parse::<SqsAction>().unwrap(), SqsAction::TagQueue);
-        assert_eq!("UntagQueue".parse::<SqsAction>().unwrap(), SqsAction::UntagQueue);
-        assert_eq!("ListQueueTags".parse::<SqsAction>().unwrap(), SqsAction::ListQueueTags);
-        assert_eq!("SendMessage".parse::<SqsAction>().unwrap(), SqsAction::SendMessage);
-        assert_eq!("SendMessageBatch".parse::<SqsAction>().unwrap(), SqsAction::SendMessageBatch);
-        assert_eq!("ReceiveMessage".parse::<SqsAction>().unwrap(), SqsAction::ReceiveMessage);
-        assert_eq!("DeleteMessage".parse::<SqsAction>().unwrap(), SqsAction::DeleteMessage);
-        assert_eq!("DeleteMessageBatch".parse::<SqsAction>().unwrap(), SqsAction::DeleteMessageBatch);
-        assert_eq!("ChangeMessageVisibility".parse::<SqsAction>().unwrap(), SqsAction::ChangeMessageVisibility);
-        assert_eq!("ChangeMessageVisibilityBatch".parse::<SqsAction>().unwrap(), SqsAction::ChangeMessageVisibilityBatch);
+        assert_eq!(
+            "CreateQueue".parse::<SqsAction>().unwrap(),
+            SqsAction::CreateQueue
+        );
+        assert_eq!(
+            "DeleteQueue".parse::<SqsAction>().unwrap(),
+            SqsAction::DeleteQueue
+        );
+        assert_eq!(
+            "GetQueueUrl".parse::<SqsAction>().unwrap(),
+            SqsAction::GetQueueUrl
+        );
+        assert_eq!(
+            "GetQueueAttributes".parse::<SqsAction>().unwrap(),
+            SqsAction::GetQueueAttributes
+        );
+        assert_eq!(
+            "SetQueueAttributes".parse::<SqsAction>().unwrap(),
+            SqsAction::SetQueueAttributes
+        );
+        assert_eq!(
+            "ListQueues".parse::<SqsAction>().unwrap(),
+            SqsAction::ListQueues
+        );
+        assert_eq!(
+            "PurgeQueue".parse::<SqsAction>().unwrap(),
+            SqsAction::PurgeQueue
+        );
+        assert_eq!(
+            "TagQueue".parse::<SqsAction>().unwrap(),
+            SqsAction::TagQueue
+        );
+        assert_eq!(
+            "UntagQueue".parse::<SqsAction>().unwrap(),
+            SqsAction::UntagQueue
+        );
+        assert_eq!(
+            "ListQueueTags".parse::<SqsAction>().unwrap(),
+            SqsAction::ListQueueTags
+        );
+        assert_eq!(
+            "SendMessage".parse::<SqsAction>().unwrap(),
+            SqsAction::SendMessage
+        );
+        assert_eq!(
+            "SendMessageBatch".parse::<SqsAction>().unwrap(),
+            SqsAction::SendMessageBatch
+        );
+        assert_eq!(
+            "ReceiveMessage".parse::<SqsAction>().unwrap(),
+            SqsAction::ReceiveMessage
+        );
+        assert_eq!(
+            "DeleteMessage".parse::<SqsAction>().unwrap(),
+            SqsAction::DeleteMessage
+        );
+        assert_eq!(
+            "DeleteMessageBatch".parse::<SqsAction>().unwrap(),
+            SqsAction::DeleteMessageBatch
+        );
+        assert_eq!(
+            "ChangeMessageVisibility".parse::<SqsAction>().unwrap(),
+            SqsAction::ChangeMessageVisibility
+        );
+        assert_eq!(
+            "ChangeMessageVisibilityBatch".parse::<SqsAction>().unwrap(),
+            SqsAction::ChangeMessageVisibilityBatch
+        );
     }
 
     #[test]
@@ -405,40 +458,123 @@ mod tests {
     fn test_queue_attribute_as_str_all_variants() {
         // Test all queue attribute variants
         assert_eq!(QueueAttribute::All.as_str(), "All");
-        assert_eq!(QueueAttribute::ApproximateNumberOfMessages.as_str(), "ApproximateNumberOfMessages");
-        assert_eq!(QueueAttribute::ApproximateNumberOfMessagesNotVisible.as_str(), "ApproximateNumberOfMessagesNotVisible");
-        assert_eq!(QueueAttribute::ApproximateNumberOfMessagesDelayed.as_str(), "ApproximateNumberOfMessagesDelayed");
-        assert_eq!(QueueAttribute::CreatedTimestamp.as_str(), "CreatedTimestamp");
-        assert_eq!(QueueAttribute::LastModifiedTimestamp.as_str(), "LastModifiedTimestamp");
-        assert_eq!(QueueAttribute::VisibilityTimeout.as_str(), "VisibilityTimeout");
-        assert_eq!(QueueAttribute::MaximumMessageSize.as_str(), "MaximumMessageSize");
-        assert_eq!(QueueAttribute::MessageRetentionPeriod.as_str(), "MessageRetentionPeriod");
+        assert_eq!(
+            QueueAttribute::ApproximateNumberOfMessages.as_str(),
+            "ApproximateNumberOfMessages"
+        );
+        assert_eq!(
+            QueueAttribute::ApproximateNumberOfMessagesNotVisible.as_str(),
+            "ApproximateNumberOfMessagesNotVisible"
+        );
+        assert_eq!(
+            QueueAttribute::ApproximateNumberOfMessagesDelayed.as_str(),
+            "ApproximateNumberOfMessagesDelayed"
+        );
+        assert_eq!(
+            QueueAttribute::CreatedTimestamp.as_str(),
+            "CreatedTimestamp"
+        );
+        assert_eq!(
+            QueueAttribute::LastModifiedTimestamp.as_str(),
+            "LastModifiedTimestamp"
+        );
+        assert_eq!(
+            QueueAttribute::VisibilityTimeout.as_str(),
+            "VisibilityTimeout"
+        );
+        assert_eq!(
+            QueueAttribute::MaximumMessageSize.as_str(),
+            "MaximumMessageSize"
+        );
+        assert_eq!(
+            QueueAttribute::MessageRetentionPeriod.as_str(),
+            "MessageRetentionPeriod"
+        );
         assert_eq!(QueueAttribute::DelaySeconds.as_str(), "DelaySeconds");
         assert_eq!(QueueAttribute::RedrivePolicy.as_str(), "RedrivePolicy");
-        assert_eq!(QueueAttribute::RedriveAllowPolicy.as_str(), "RedriveAllowPolicy");
+        assert_eq!(
+            QueueAttribute::RedriveAllowPolicy.as_str(),
+            "RedriveAllowPolicy"
+        );
         assert_eq!(QueueAttribute::FifoQueue.as_str(), "FifoQueue");
-        assert_eq!(QueueAttribute::ContentBasedDeduplication.as_str(), "ContentBasedDeduplication");
+        assert_eq!(
+            QueueAttribute::ContentBasedDeduplication.as_str(),
+            "ContentBasedDeduplication"
+        );
         assert_eq!(QueueAttribute::QueueArn.as_str(), "QueueArn");
     }
 
     #[test]
     fn test_queue_attribute_from_str_all_variants() {
         // Test all queue attribute variants parsing
-        assert_eq!("All".parse::<QueueAttribute>().unwrap(), QueueAttribute::All);
-        assert_eq!("ApproximateNumberOfMessages".parse::<QueueAttribute>().unwrap(), QueueAttribute::ApproximateNumberOfMessages);
-        assert_eq!("ApproximateNumberOfMessagesNotVisible".parse::<QueueAttribute>().unwrap(), QueueAttribute::ApproximateNumberOfMessagesNotVisible);
-        assert_eq!("ApproximateNumberOfMessagesDelayed".parse::<QueueAttribute>().unwrap(), QueueAttribute::ApproximateNumberOfMessagesDelayed);
-        assert_eq!("CreatedTimestamp".parse::<QueueAttribute>().unwrap(), QueueAttribute::CreatedTimestamp);
-        assert_eq!("LastModifiedTimestamp".parse::<QueueAttribute>().unwrap(), QueueAttribute::LastModifiedTimestamp);
-        assert_eq!("VisibilityTimeout".parse::<QueueAttribute>().unwrap(), QueueAttribute::VisibilityTimeout);
-        assert_eq!("MaximumMessageSize".parse::<QueueAttribute>().unwrap(), QueueAttribute::MaximumMessageSize);
-        assert_eq!("MessageRetentionPeriod".parse::<QueueAttribute>().unwrap(), QueueAttribute::MessageRetentionPeriod);
-        assert_eq!("DelaySeconds".parse::<QueueAttribute>().unwrap(), QueueAttribute::DelaySeconds);
-        assert_eq!("RedrivePolicy".parse::<QueueAttribute>().unwrap(), QueueAttribute::RedrivePolicy);
-        assert_eq!("RedriveAllowPolicy".parse::<QueueAttribute>().unwrap(), QueueAttribute::RedriveAllowPolicy);
-        assert_eq!("FifoQueue".parse::<QueueAttribute>().unwrap(), QueueAttribute::FifoQueue);
-        assert_eq!("ContentBasedDeduplication".parse::<QueueAttribute>().unwrap(), QueueAttribute::ContentBasedDeduplication);
-        assert_eq!("QueueArn".parse::<QueueAttribute>().unwrap(), QueueAttribute::QueueArn);
+        assert_eq!(
+            "All".parse::<QueueAttribute>().unwrap(),
+            QueueAttribute::All
+        );
+        assert_eq!(
+            "ApproximateNumberOfMessages"
+                .parse::<QueueAttribute>()
+                .unwrap(),
+            QueueAttribute::ApproximateNumberOfMessages
+        );
+        assert_eq!(
+            "ApproximateNumberOfMessagesNotVisible"
+                .parse::<QueueAttribute>()
+                .unwrap(),
+            QueueAttribute::ApproximateNumberOfMessagesNotVisible
+        );
+        assert_eq!(
+            "ApproximateNumberOfMessagesDelayed"
+                .parse::<QueueAttribute>()
+                .unwrap(),
+            QueueAttribute::ApproximateNumberOfMessagesDelayed
+        );
+        assert_eq!(
+            "CreatedTimestamp".parse::<QueueAttribute>().unwrap(),
+            QueueAttribute::CreatedTimestamp
+        );
+        assert_eq!(
+            "LastModifiedTimestamp".parse::<QueueAttribute>().unwrap(),
+            QueueAttribute::LastModifiedTimestamp
+        );
+        assert_eq!(
+            "VisibilityTimeout".parse::<QueueAttribute>().unwrap(),
+            QueueAttribute::VisibilityTimeout
+        );
+        assert_eq!(
+            "MaximumMessageSize".parse::<QueueAttribute>().unwrap(),
+            QueueAttribute::MaximumMessageSize
+        );
+        assert_eq!(
+            "MessageRetentionPeriod".parse::<QueueAttribute>().unwrap(),
+            QueueAttribute::MessageRetentionPeriod
+        );
+        assert_eq!(
+            "DelaySeconds".parse::<QueueAttribute>().unwrap(),
+            QueueAttribute::DelaySeconds
+        );
+        assert_eq!(
+            "RedrivePolicy".parse::<QueueAttribute>().unwrap(),
+            QueueAttribute::RedrivePolicy
+        );
+        assert_eq!(
+            "RedriveAllowPolicy".parse::<QueueAttribute>().unwrap(),
+            QueueAttribute::RedriveAllowPolicy
+        );
+        assert_eq!(
+            "FifoQueue".parse::<QueueAttribute>().unwrap(),
+            QueueAttribute::FifoQueue
+        );
+        assert_eq!(
+            "ContentBasedDeduplication"
+                .parse::<QueueAttribute>()
+                .unwrap(),
+            QueueAttribute::ContentBasedDeduplication
+        );
+        assert_eq!(
+            "QueueArn".parse::<QueueAttribute>().unwrap(),
+            QueueAttribute::QueueArn
+        );
     }
 
     #[test]
@@ -456,13 +592,31 @@ mod tests {
     #[test]
     fn test_sqs_error_code_as_str_all_variants() {
         // Test all error code variants
-        assert_eq!(SqsErrorCode::QueueDoesNotExist.as_str(), "AWS.SimpleQueueService.NonExistentQueue");
-        assert_eq!(SqsErrorCode::QueueAlreadyExists.as_str(), "QueueAlreadyExists");
-        assert_eq!(SqsErrorCode::InvalidParameterValue.as_str(), "InvalidParameterValue");
+        assert_eq!(
+            SqsErrorCode::QueueDoesNotExist.as_str(),
+            "AWS.SimpleQueueService.NonExistentQueue"
+        );
+        assert_eq!(
+            SqsErrorCode::QueueAlreadyExists.as_str(),
+            "QueueAlreadyExists"
+        );
+        assert_eq!(
+            SqsErrorCode::InvalidParameterValue.as_str(),
+            "InvalidParameterValue"
+        );
         assert_eq!(SqsErrorCode::MissingParameter.as_str(), "MissingParameter");
-        assert_eq!(SqsErrorCode::InvalidAttributeName.as_str(), "InvalidAttributeName");
-        assert_eq!(SqsErrorCode::ReceiptHandleIsInvalid.as_str(), "ReceiptHandleIsInvalid");
-        assert_eq!(SqsErrorCode::BatchRequestTooLong.as_str(), "AWS.SimpleQueueService.BatchRequestTooLong");
+        assert_eq!(
+            SqsErrorCode::InvalidAttributeName.as_str(),
+            "InvalidAttributeName"
+        );
+        assert_eq!(
+            SqsErrorCode::ReceiptHandleIsInvalid.as_str(),
+            "ReceiptHandleIsInvalid"
+        );
+        assert_eq!(
+            SqsErrorCode::BatchRequestTooLong.as_str(),
+            "AWS.SimpleQueueService.BatchRequestTooLong"
+        );
         assert_eq!(SqsErrorCode::InternalError.as_str(), "InternalError");
     }
 
@@ -473,11 +627,20 @@ mod tests {
     #[test]
     fn test_md5_of_body_various_inputs() {
         // Test empty string
-        assert_eq!(calculate_md5_of_body(""), "d41d8cd98f00b204e9800998ecf8427e");
+        assert_eq!(
+            calculate_md5_of_body(""),
+            "d41d8cd98f00b204e9800998ecf8427e"
+        );
 
         // Test known MD5 values
-        assert_eq!(calculate_md5_of_body("Hello, World!"), "65a8e27d8879283831b664bd8b7f0ad4");
-        assert_eq!(calculate_md5_of_body("test"), "098f6bcd4621d373cade4e832627b4f6");
+        assert_eq!(
+            calculate_md5_of_body("Hello, World!"),
+            "65a8e27d8879283831b664bd8b7f0ad4"
+        );
+        assert_eq!(
+            calculate_md5_of_body("test"),
+            "098f6bcd4621d373cade4e832627b4f6"
+        );
     }
 
     #[test]
@@ -525,28 +688,40 @@ mod tests {
     fn test_md5_of_attributes_sorting() {
         // Test that attribute names are sorted before MD5 calculation
         let mut attrs1 = SqsMessageAttributes::new();
-        attrs1.insert("zebra".to_string(), SqsMessageAttributeValue {
-            data_type: "String".to_string(),
-            string_value: Some("value1".to_string()),
-            binary_value: None,
-        });
-        attrs1.insert("alpha".to_string(), SqsMessageAttributeValue {
-            data_type: "String".to_string(),
-            string_value: Some("value2".to_string()),
-            binary_value: None,
-        });
+        attrs1.insert(
+            "zebra".to_string(),
+            SqsMessageAttributeValue {
+                data_type: "String".to_string(),
+                string_value: Some("value1".to_string()),
+                binary_value: None,
+            },
+        );
+        attrs1.insert(
+            "alpha".to_string(),
+            SqsMessageAttributeValue {
+                data_type: "String".to_string(),
+                string_value: Some("value2".to_string()),
+                binary_value: None,
+            },
+        );
 
         let mut attrs2 = SqsMessageAttributes::new();
-        attrs2.insert("alpha".to_string(), SqsMessageAttributeValue {
-            data_type: "String".to_string(),
-            string_value: Some("value2".to_string()),
-            binary_value: None,
-        });
-        attrs2.insert("zebra".to_string(), SqsMessageAttributeValue {
-            data_type: "String".to_string(),
-            string_value: Some("value1".to_string()),
-            binary_value: None,
-        });
+        attrs2.insert(
+            "alpha".to_string(),
+            SqsMessageAttributeValue {
+                data_type: "String".to_string(),
+                string_value: Some("value2".to_string()),
+                binary_value: None,
+            },
+        );
+        attrs2.insert(
+            "zebra".to_string(),
+            SqsMessageAttributeValue {
+                data_type: "String".to_string(),
+                string_value: Some("value1".to_string()),
+                binary_value: None,
+            },
+        );
 
         // MD5 should be the same regardless of insertion order
         assert_eq!(
@@ -571,24 +746,33 @@ mod tests {
         // Test MD5 with multiple attribute types
         let mut attrs = SqsMessageAttributes::new();
 
-        attrs.insert("string_attr".to_string(), SqsMessageAttributeValue {
-            data_type: "String".to_string(),
-            string_value: Some("test_value".to_string()),
-            binary_value: None,
-        });
+        attrs.insert(
+            "string_attr".to_string(),
+            SqsMessageAttributeValue {
+                data_type: "String".to_string(),
+                string_value: Some("test_value".to_string()),
+                binary_value: None,
+            },
+        );
 
-        attrs.insert("number_attr".to_string(), SqsMessageAttributeValue {
-            data_type: "Number".to_string(),
-            string_value: Some("123".to_string()),
-            binary_value: None,
-        });
+        attrs.insert(
+            "number_attr".to_string(),
+            SqsMessageAttributeValue {
+                data_type: "Number".to_string(),
+                string_value: Some("123".to_string()),
+                binary_value: None,
+            },
+        );
 
         let binary_data = base64::engine::general_purpose::STANDARD.encode(b"binary_data");
-        attrs.insert("binary_attr".to_string(), SqsMessageAttributeValue {
-            data_type: "Binary".to_string(),
-            string_value: None,
-            binary_value: Some(binary_data),
-        });
+        attrs.insert(
+            "binary_attr".to_string(),
+            SqsMessageAttributeValue {
+                data_type: "Binary".to_string(),
+                string_value: None,
+                binary_value: Some(binary_data),
+            },
+        );
 
         let md5 = calculate_md5_of_attributes(&attrs);
         assert!(!md5.is_empty());

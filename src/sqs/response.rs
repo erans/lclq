@@ -72,7 +72,11 @@ pub fn build_error_response(code: SqsErrorCode, message: &str) -> String {
 }
 
 /// Build a SendMessage response.
-pub fn build_send_message_response(message_id: &str, md5_of_body: &str, md5_of_attrs: Option<&str>) -> String {
+pub fn build_send_message_response(
+    message_id: &str,
+    md5_of_body: &str,
+    md5_of_attrs: Option<&str>,
+) -> String {
     let builder = XmlResponseBuilder::new("SendMessage")
         .add_element("MessageId", message_id)
         .add_element("MD5OfMessageBody", md5_of_body);
@@ -116,7 +120,9 @@ pub fn build_send_message_batch_response(
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0"?>"#);
     xml.push('\n');
-    xml.push_str(r#"<SendMessageBatchResponse xmlns="http://queue.amazonaws.com/doc/2012-11-05/">"#);
+    xml.push_str(
+        r#"<SendMessageBatchResponse xmlns="http://queue.amazonaws.com/doc/2012-11-05/">"#,
+    );
     xml.push('\n');
     xml.push_str("  <SendMessageBatchResult>\n");
 
@@ -124,10 +130,19 @@ pub fn build_send_message_batch_response(
     for entry in successful {
         xml.push_str("    <SendMessageBatchResultEntry>\n");
         xml.push_str(&format!("      <Id>{}</Id>\n", escape_xml(&entry.id)));
-        xml.push_str(&format!("      <MessageId>{}</MessageId>\n", escape_xml(&entry.message_id)));
-        xml.push_str(&format!("      <MD5OfMessageBody>{}</MD5OfMessageBody>\n", escape_xml(&entry.md5_of_body)));
+        xml.push_str(&format!(
+            "      <MessageId>{}</MessageId>\n",
+            escape_xml(&entry.message_id)
+        ));
+        xml.push_str(&format!(
+            "      <MD5OfMessageBody>{}</MD5OfMessageBody>\n",
+            escape_xml(&entry.md5_of_body)
+        ));
         if let Some(md5_attrs) = &entry.md5_of_attrs {
-            xml.push_str(&format!("      <MD5OfMessageAttributes>{}</MD5OfMessageAttributes>\n", escape_xml(md5_attrs)));
+            xml.push_str(&format!(
+                "      <MD5OfMessageAttributes>{}</MD5OfMessageAttributes>\n",
+                escape_xml(md5_attrs)
+            ));
         }
         xml.push_str("    </SendMessageBatchResultEntry>\n");
     }
@@ -137,8 +152,14 @@ pub fn build_send_message_batch_response(
         xml.push_str("    <BatchResultErrorEntry>\n");
         xml.push_str(&format!("      <Id>{}</Id>\n", escape_xml(&entry.id)));
         xml.push_str(&format!("      <Code>{}</Code>\n", escape_xml(&entry.code)));
-        xml.push_str(&format!("      <Message>{}</Message>\n", escape_xml(&entry.message)));
-        xml.push_str(&format!("      <SenderFault>{}</SenderFault>\n", entry.sender_fault));
+        xml.push_str(&format!(
+            "      <Message>{}</Message>\n",
+            escape_xml(&entry.message)
+        ));
+        xml.push_str(&format!(
+            "      <SenderFault>{}</SenderFault>\n",
+            entry.sender_fault
+        ));
         xml.push_str("    </BatchResultErrorEntry>\n");
     }
 
@@ -153,13 +174,15 @@ pub fn build_send_message_batch_response(
 
 /// Build a DeleteMessageBatch response.
 pub fn build_delete_message_batch_response(
-    successful: &[String],  // Just IDs for successful deletes
+    successful: &[String], // Just IDs for successful deletes
     failed: &[BatchErrorEntry],
 ) -> String {
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0"?>"#);
     xml.push('\n');
-    xml.push_str(r#"<DeleteMessageBatchResponse xmlns="http://queue.amazonaws.com/doc/2012-11-05/">"#);
+    xml.push_str(
+        r#"<DeleteMessageBatchResponse xmlns="http://queue.amazonaws.com/doc/2012-11-05/">"#,
+    );
     xml.push('\n');
     xml.push_str("  <DeleteMessageBatchResult>\n");
 
@@ -175,8 +198,14 @@ pub fn build_delete_message_batch_response(
         xml.push_str("    <BatchResultErrorEntry>\n");
         xml.push_str(&format!("      <Id>{}</Id>\n", escape_xml(&entry.id)));
         xml.push_str(&format!("      <Code>{}</Code>\n", escape_xml(&entry.code)));
-        xml.push_str(&format!("      <Message>{}</Message>\n", escape_xml(&entry.message)));
-        xml.push_str(&format!("      <SenderFault>{}</SenderFault>\n", entry.sender_fault));
+        xml.push_str(&format!(
+            "      <Message>{}</Message>\n",
+            escape_xml(&entry.message)
+        ));
+        xml.push_str(&format!(
+            "      <SenderFault>{}</SenderFault>\n",
+            entry.sender_fault
+        ));
         xml.push_str("    </BatchResultErrorEntry>\n");
     }
 
@@ -191,7 +220,7 @@ pub fn build_delete_message_batch_response(
 
 /// Build a ChangeMessageVisibilityBatch response.
 pub fn build_change_visibility_batch_response(
-    successful: &[String],  // Just IDs for successful changes
+    successful: &[String], // Just IDs for successful changes
     failed: &[BatchErrorEntry],
 ) -> String {
     let mut xml = String::new();
@@ -213,8 +242,14 @@ pub fn build_change_visibility_batch_response(
         xml.push_str("    <BatchResultErrorEntry>\n");
         xml.push_str(&format!("      <Id>{}</Id>\n", escape_xml(&entry.id)));
         xml.push_str(&format!("      <Code>{}</Code>\n", escape_xml(&entry.code)));
-        xml.push_str(&format!("      <Message>{}</Message>\n", escape_xml(&entry.message)));
-        xml.push_str(&format!("      <SenderFault>{}</SenderFault>\n", entry.sender_fault));
+        xml.push_str(&format!(
+            "      <Message>{}</Message>\n",
+            escape_xml(&entry.message)
+        ));
+        xml.push_str(&format!(
+            "      <SenderFault>{}</SenderFault>\n",
+            entry.sender_fault
+        ));
         xml.push_str("    </BatchResultErrorEntry>\n");
     }
 
@@ -238,9 +273,18 @@ pub fn build_receive_message_response(messages: &[ReceivedMessageInfo]) -> Strin
 
     for msg in messages {
         xml.push_str("    <Message>\n");
-        xml.push_str(&format!("      <MessageId>{}</MessageId>\n", msg.message_id));
-        xml.push_str(&format!("      <ReceiptHandle>{}</ReceiptHandle>\n", msg.receipt_handle));
-        xml.push_str(&format!("      <MD5OfBody>{}</MD5OfBody>\n", msg.md5_of_body));
+        xml.push_str(&format!(
+            "      <MessageId>{}</MessageId>\n",
+            msg.message_id
+        ));
+        xml.push_str(&format!(
+            "      <ReceiptHandle>{}</ReceiptHandle>\n",
+            msg.receipt_handle
+        ));
+        xml.push_str(&format!(
+            "      <MD5OfBody>{}</MD5OfBody>\n",
+            msg.md5_of_body
+        ));
         xml.push_str(&format!("      <Body>{}</Body>\n", escape_xml(&msg.body)));
 
         // Add attributes
@@ -256,9 +300,15 @@ pub fn build_receive_message_response(messages: &[ReceivedMessageInfo]) -> Strin
             xml.push_str("      <MessageAttribute>\n");
             xml.push_str(&format!("        <Name>{}</Name>\n", key));
             xml.push_str("        <Value>\n");
-            xml.push_str(&format!("          <DataType>{}</DataType>\n", value.data_type));
+            xml.push_str(&format!(
+                "          <DataType>{}</DataType>\n",
+                value.data_type
+            ));
             if let Some(ref string_value) = value.string_value {
-                xml.push_str(&format!("          <StringValue>{}</StringValue>\n", escape_xml(string_value)));
+                xml.push_str(&format!(
+                    "          <StringValue>{}</StringValue>\n",
+                    escape_xml(string_value)
+                ));
             }
             xml.push_str("        </Value>\n");
             xml.push_str("      </MessageAttribute>\n");
@@ -337,7 +387,9 @@ pub fn build_get_queue_attributes_response(attributes: &[(String, String)]) -> S
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0"?>"#);
     xml.push('\n');
-    xml.push_str(r#"<GetQueueAttributesResponse xmlns="http://queue.amazonaws.com/doc/2012-11-05/">"#);
+    xml.push_str(
+        r#"<GetQueueAttributesResponse xmlns="http://queue.amazonaws.com/doc/2012-11-05/">"#,
+    );
     xml.push('\n');
     xml.push_str("  <GetQueueAttributesResult>\n");
 
@@ -602,9 +654,10 @@ mod tests {
 
     #[test]
     fn test_get_queue_attributes_with_xml_escaping() {
-        let attributes = vec![
-            ("RedrivPolicy".to_string(), "{\"maxReceiveCount\":\"5\"}".to_string()),
-        ];
+        let attributes = vec![(
+            "RedrivPolicy".to_string(),
+            "{\"maxReceiveCount\":\"5\"}".to_string(),
+        )];
         let response = build_get_queue_attributes_response(&attributes);
         assert!(response.contains("&quot;"));
     }
@@ -615,10 +668,8 @@ mod tests {
 
     #[test]
     fn test_error_response() {
-        let response = build_error_response(
-            SqsErrorCode::QueueDoesNotExist,
-            "Queue does not exist",
-        );
+        let response =
+            build_error_response(SqsErrorCode::QueueDoesNotExist, "Queue does not exist");
         assert!(response.contains("ErrorResponse"));
         assert!(response.contains("AWS.SimpleQueueService.NonExistentQueue"));
         assert!(response.contains("Queue does not exist"));
@@ -626,10 +677,8 @@ mod tests {
 
     #[test]
     fn test_error_response_with_xml_escaping() {
-        let response = build_error_response(
-            SqsErrorCode::InvalidParameterValue,
-            "Invalid value: <test>",
-        );
+        let response =
+            build_error_response(SqsErrorCode::InvalidParameterValue, "Invalid value: <test>");
         assert!(response.contains("&lt;test&gt;"));
     }
 
@@ -649,11 +698,7 @@ mod tests {
 
     #[test]
     fn test_send_message_response() {
-        let response = build_send_message_response(
-            "msg-123",
-            "abc123",
-            Some("def456"),
-        );
+        let response = build_send_message_response("msg-123", "abc123", Some("def456"));
         assert!(response.contains("SendMessageResponse"));
         assert!(response.contains("msg-123"));
         assert!(response.contains("abc123"));

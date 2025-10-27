@@ -1,6 +1,6 @@
 //! Receipt handle generation and parsing with HMAC signatures.
 
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -36,7 +36,7 @@ fn get_secret_key() -> Vec<u8> {
         .expect(
             "LCLQ_RECEIPT_SECRET environment variable must be set. \
             For security, receipt handles require a secret key for HMAC signatures. \
-            Generate a strong random secret: openssl rand -hex 32"
+            Generate a strong random secret: openssl rand -hex 32",
         )
         .into_bytes()
 }
@@ -52,12 +52,12 @@ pub fn generate_receipt_handle(queue_id: &str, message_id: &MessageId) -> String
     };
 
     // Serialize without signature to compute HMAC
-    let json_without_sig = serde_json::to_string(&data).expect("Failed to serialize receipt handle");
+    let json_without_sig =
+        serde_json::to_string(&data).expect("Failed to serialize receipt handle");
 
     // Compute HMAC signature
     let secret_key = get_secret_key();
-    let mut mac = HmacSha256::new_from_slice(&secret_key)
-        .expect("HMAC can take key of any size");
+    let mut mac = HmacSha256::new_from_slice(&secret_key).expect("HMAC can take key of any size");
     mac.update(json_without_sig.as_bytes());
     let signature = hex::encode(mac.finalize().into_bytes());
 
@@ -83,25 +83,20 @@ pub fn parse_receipt_handle(receipt_handle: &str) -> Result<ReceiptHandleData> {
         serde_json::from_str(&json).map_err(|_| Error::InvalidReceiptHandle)?;
 
     // Extract and verify signature
-    let provided_signature = data
-        .signature
-        .take()
-        .ok_or(Error::InvalidReceiptHandle)?;
+    let provided_signature = data.signature.take().ok_or(Error::InvalidReceiptHandle)?;
 
     // Serialize without signature to recompute HMAC
-    let json_without_sig = serde_json::to_string(&data)
-        .map_err(|_| Error::InvalidReceiptHandle)?;
+    let json_without_sig = serde_json::to_string(&data).map_err(|_| Error::InvalidReceiptHandle)?;
 
     // Compute expected HMAC
     let secret_key = get_secret_key();
-    let mut mac = HmacSha256::new_from_slice(&secret_key)
-        .expect("HMAC can take key of any size");
+    let mut mac = HmacSha256::new_from_slice(&secret_key).expect("HMAC can take key of any size");
     mac.update(json_without_sig.as_bytes());
 
     // Verify signature (constant-time comparison)
     let expected_signature_bytes = mac.finalize().into_bytes();
-    let provided_signature_bytes = hex::decode(&provided_signature)
-        .map_err(|_| Error::InvalidReceiptHandle)?;
+    let provided_signature_bytes =
+        hex::decode(&provided_signature).map_err(|_| Error::InvalidReceiptHandle)?;
 
     // Use constant-time comparison to prevent timing attacks
     if expected_signature_bytes.len() != provided_signature_bytes.len() {
@@ -109,7 +104,10 @@ pub fn parse_receipt_handle(receipt_handle: &str) -> Result<ReceiptHandleData> {
     }
 
     let mut diff = 0u8;
-    for (a, b) in expected_signature_bytes.iter().zip(provided_signature_bytes.iter()) {
+    for (a, b) in expected_signature_bytes
+        .iter()
+        .zip(provided_signature_bytes.iter())
+    {
         diff |= a ^ b;
     }
 

@@ -1,11 +1,11 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
-use lclq::storage::memory::InMemoryBackend;
-use lclq::storage::StorageBackend;
-use lclq::types::{Message, MessageId, QueueConfig, QueueType, ReceiveOptions};
-use std::sync::Arc;
-use std::collections::HashMap;
-use tokio::runtime::Runtime;
 use chrono::Utc;
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use lclq::storage::StorageBackend;
+use lclq::storage::memory::InMemoryBackend;
+use lclq::types::{Message, MessageId, QueueConfig, QueueType, ReceiveOptions};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::runtime::Runtime;
 
 /// Create a test queue
 async fn create_test_queue(backend: &Arc<dyn StorageBackend>) -> QueueConfig {
@@ -73,14 +73,18 @@ fn bench_send_messages_batch(c: &mut Criterion) {
         let body = "test message body".to_string();
 
         group.throughput(Throughput::Elements(*batch_size as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(batch_size), batch_size, |b, &size| {
-            b.to_async(&rt).iter(|| async {
-                let messages: Vec<Message> = (0..size)
-                    .map(|_| create_test_message(&queue.id, body.clone()))
-                    .collect();
-                black_box(backend.send_messages(&queue.id, messages).await.unwrap());
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(batch_size),
+            batch_size,
+            |b, &size| {
+                b.to_async(&rt).iter(|| async {
+                    let messages: Vec<Message> = (0..size)
+                        .map(|_| create_test_message(&queue.id, body.clone()))
+                        .collect();
+                    black_box(backend.send_messages(&queue.id, messages).await.unwrap());
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -98,21 +102,26 @@ fn bench_receive_messages(c: &mut Criterion) {
         let messages: Vec<Message> = (0..1000)
             .map(|_| create_test_message(&queue.id, "test".to_string()))
             .collect();
-        rt.block_on(backend.send_messages(&queue.id, messages)).unwrap();
+        rt.block_on(backend.send_messages(&queue.id, messages))
+            .unwrap();
 
         group.throughput(Throughput::Elements(*max_messages as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(max_messages), max_messages, |b, &max| {
-            b.to_async(&rt).iter(|| async {
-                let options = ReceiveOptions {
-                    max_messages: max,
-                    visibility_timeout: Some(30),
-                    wait_time_seconds: 0,
-                    attribute_names: vec![],
-                    message_attribute_names: vec![],
-                };
-                black_box(backend.receive_messages(&queue.id, options).await.unwrap());
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(max_messages),
+            max_messages,
+            |b, &max| {
+                b.to_async(&rt).iter(|| async {
+                    let options = ReceiveOptions {
+                        max_messages: max,
+                        visibility_timeout: Some(30),
+                        wait_time_seconds: 0,
+                        attribute_names: vec![],
+                        message_attribute_names: vec![],
+                    };
+                    black_box(backend.receive_messages(&queue.id, options).await.unwrap());
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -141,7 +150,10 @@ fn bench_delete_message(c: &mut Criterion) {
             let receipt_handle = received[0].receipt_handle.clone();
 
             // Delete it
-            backend.delete_message(&queue.id, &receipt_handle).await.unwrap();
+            backend
+                .delete_message(&queue.id, &receipt_handle)
+                .await
+                .unwrap();
         });
     });
 }
@@ -170,7 +182,10 @@ fn bench_round_trip(c: &mut Criterion) {
             let receipt_handle = received[0].receipt_handle.clone();
 
             // Delete
-            backend.delete_message(&queue.id, &receipt_handle).await.unwrap();
+            backend
+                .delete_message(&queue.id, &receipt_handle)
+                .await
+                .unwrap();
         });
     });
 }
@@ -185,24 +200,29 @@ fn bench_purge_queue(c: &mut Criterion) {
         let queue = rt.block_on(create_test_queue(&backend));
 
         group.throughput(Throughput::Elements(*msg_count as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(msg_count), msg_count, |b, &count| {
-            b.iter_batched(
-                || {
-                    // Setup: populate queue with messages
-                    let messages: Vec<Message> = (0..count)
-                        .map(|_| create_test_message(&queue.id, "test".to_string()))
-                        .collect();
-                    rt.block_on(backend.send_messages(&queue.id, messages)).unwrap();
-                },
-                |_| {
-                    // Benchmark: purge the queue
-                    rt.block_on(async {
-                        backend.purge_queue(&queue.id).await.unwrap();
-                    });
-                },
-                criterion::BatchSize::PerIteration,
-            );
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(msg_count),
+            msg_count,
+            |b, &count| {
+                b.iter_batched(
+                    || {
+                        // Setup: populate queue with messages
+                        let messages: Vec<Message> = (0..count)
+                            .map(|_| create_test_message(&queue.id, "test".to_string()))
+                            .collect();
+                        rt.block_on(backend.send_messages(&queue.id, messages))
+                            .unwrap();
+                    },
+                    |_| {
+                        // Benchmark: purge the queue
+                        rt.block_on(async {
+                            backend.purge_queue(&queue.id).await.unwrap();
+                        });
+                    },
+                    criterion::BatchSize::PerIteration,
+                );
+            },
+        );
     }
     group.finish();
 }
@@ -217,7 +237,8 @@ fn bench_get_stats(c: &mut Criterion) {
     let messages: Vec<Message> = (0..1000)
         .map(|_| create_test_message(&queue.id, "test".to_string()))
         .collect();
-    rt.block_on(backend.send_messages(&queue.id, messages)).unwrap();
+    rt.block_on(backend.send_messages(&queue.id, messages))
+        .unwrap();
 
     c.bench_function("get_stats", |b| {
         b.to_async(&rt).iter(|| async {
@@ -236,24 +257,28 @@ fn bench_concurrent_sends(c: &mut Criterion) {
         let queue = rt.block_on(create_test_queue(&backend));
 
         group.throughput(Throughput::Elements(*concurrency as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(concurrency), concurrency, |b, &conc| {
-            b.to_async(&rt).iter(|| async {
-                let handles: Vec<_> = (0..conc)
-                    .map(|_| {
-                        let backend = backend.clone();
-                        let queue_id = queue.id.clone();
-                        tokio::spawn(async move {
-                            let msg = create_test_message(&queue_id, "test".to_string());
-                            backend.send_message(&queue_id, msg).await.unwrap();
+        group.bench_with_input(
+            BenchmarkId::from_parameter(concurrency),
+            concurrency,
+            |b, &conc| {
+                b.to_async(&rt).iter(|| async {
+                    let handles: Vec<_> = (0..conc)
+                        .map(|_| {
+                            let backend = backend.clone();
+                            let queue_id = queue.id.clone();
+                            tokio::spawn(async move {
+                                let msg = create_test_message(&queue_id, "test".to_string());
+                                backend.send_message(&queue_id, msg).await.unwrap();
+                            })
                         })
-                    })
-                    .collect();
+                        .collect();
 
-                for handle in handles {
-                    handle.await.unwrap();
-                }
-            });
-        });
+                    for handle in handles {
+                        handle.await.unwrap();
+                    }
+                });
+            },
+        );
     }
     group.finish();
 }

@@ -1,11 +1,14 @@
 //! Integration tests for SQS handler.
 
-use lclq::config::{BackendConfig, EvictionPolicy, LclqConfig, LogFormat, PubsubConfig, SqsConfig, ServerConfig, StorageConfig};
+use lclq::config::{
+    BackendConfig, EvictionPolicy, LclqConfig, LogFormat, PubsubConfig, ServerConfig, SqsConfig,
+    StorageConfig,
+};
+use lclq::sqs::SqsRequest;
 use lclq::sqs::handler::SqsHandler;
 use lclq::sqs::types::SqsAction;
-use lclq::sqs::SqsRequest;
-use lclq::storage::memory::InMemoryBackend;
 use lclq::storage::StorageBackend; // Import trait to use trait methods
+use lclq::storage::memory::InMemoryBackend;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -101,10 +104,7 @@ async fn test_handle_create_queue_fifo() {
         .await
         .expect("FIFO queue should exist");
     assert_eq!(queue.name, "test-queue.fifo");
-    assert!(matches!(
-        queue.queue_type,
-        lclq::types::QueueType::SqsFifo
-    ));
+    assert!(matches!(queue.queue_type, lclq::types::QueueType::SqsFifo));
 }
 
 /// Test CreateQueue with invalid queue name.
@@ -271,10 +271,7 @@ async fn test_handle_send_message_with_attributes() {
         "http://127.0.0.1:9324/queue/attr-queue".to_string(),
     );
     params.insert("MessageBody".to_string(), "Test message".to_string());
-    params.insert(
-        "MessageAttribute.1.Name".to_string(),
-        "Author".to_string(),
-    );
+    params.insert("MessageAttribute.1.Name".to_string(), "Author".to_string());
     params.insert(
         "MessageAttribute.1.Value.DataType".to_string(),
         "String".to_string(),
@@ -556,17 +553,26 @@ async fn test_handle_send_message_batch() {
         "QueueUrl".to_string(),
         "http://127.0.0.1:9324/queue/batch-queue".to_string(),
     );
-    params.insert("SendMessageBatchRequestEntry.1.Id".to_string(), "msg1".to_string());
+    params.insert(
+        "SendMessageBatchRequestEntry.1.Id".to_string(),
+        "msg1".to_string(),
+    );
     params.insert(
         "SendMessageBatchRequestEntry.1.MessageBody".to_string(),
         "Message 1".to_string(),
     );
-    params.insert("SendMessageBatchRequestEntry.2.Id".to_string(), "msg2".to_string());
+    params.insert(
+        "SendMessageBatchRequestEntry.2.Id".to_string(),
+        "msg2".to_string(),
+    );
     params.insert(
         "SendMessageBatchRequestEntry.2.MessageBody".to_string(),
         "Message 2".to_string(),
     );
-    params.insert("SendMessageBatchRequestEntry.3.Id".to_string(), "msg3".to_string());
+    params.insert(
+        "SendMessageBatchRequestEntry.3.Id".to_string(),
+        "msg3".to_string(),
+    );
     params.insert(
         "SendMessageBatchRequestEntry.3.MessageBody".to_string(),
         "Message 3".to_string(),

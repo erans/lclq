@@ -43,12 +43,13 @@ impl SqsRequest {
             .strip_prefix("AmazonSQS.")
             .ok_or_else(|| format!("Invalid X-Amz-Target format: {}", target))?;
 
-        let action = action_str.parse::<SqsAction>()
+        let action = action_str
+            .parse::<SqsAction>()
             .map_err(|e| format!("Unknown action: {}", e))?;
 
         // Parse JSON body
-        let json: Value = serde_json::from_str(body)
-            .map_err(|e| format!("Failed to parse JSON body: {}", e))?;
+        let json: Value =
+            serde_json::from_str(body).map_err(|e| format!("Failed to parse JSON body: {}", e))?;
 
         // Convert JSON to HashMap<String, String>
         let mut params = HashMap::new();
@@ -70,7 +71,9 @@ impl SqsRequest {
                         }
                         Value::String(s) if s.trim().starts_with('{') => {
                             // JSON string - parse and flatten
-                            if let Ok(attrs) = serde_json::from_str::<serde_json::Map<String, Value>>(s) {
+                            if let Ok(attrs) =
+                                serde_json::from_str::<serde_json::Map<String, Value>>(s)
+                            {
                                 for (attr_key, attr_val) in attrs {
                                     let attr_str = match attr_val {
                                         Value::String(s) => s,
@@ -95,30 +98,37 @@ impl SqsRequest {
                     if let Value::Object(attrs) = value {
                         let mut index = 1;
                         for (attr_name, attr_value) in attrs {
-                            params.insert(format!("MessageAttribute.{}.Name", index), attr_name.clone());
+                            params.insert(
+                                format!("MessageAttribute.{}.Name", index),
+                                attr_name.clone(),
+                            );
 
                             if let Value::Object(attr_obj) = attr_value {
                                 // Extract DataType
                                 if let Some(Value::String(data_type)) = attr_obj.get("DataType") {
                                     params.insert(
                                         format!("MessageAttribute.{}.Value.DataType", index),
-                                        data_type.clone()
+                                        data_type.clone(),
                                     );
                                 }
 
                                 // Extract StringValue if present
-                                if let Some(Value::String(string_value)) = attr_obj.get("StringValue") {
+                                if let Some(Value::String(string_value)) =
+                                    attr_obj.get("StringValue")
+                                {
                                     params.insert(
                                         format!("MessageAttribute.{}.Value.StringValue", index),
-                                        string_value.clone()
+                                        string_value.clone(),
                                     );
                                 }
 
                                 // Extract BinaryValue if present
-                                if let Some(Value::String(binary_value)) = attr_obj.get("BinaryValue") {
+                                if let Some(Value::String(binary_value)) =
+                                    attr_obj.get("BinaryValue")
+                                {
                                     params.insert(
                                         format!("MessageAttribute.{}.Value.BinaryValue", index),
-                                        binary_value.clone()
+                                        binary_value.clone(),
                                     );
                                 }
                             }
@@ -143,15 +153,15 @@ impl SqsRequest {
                     Value::Array(arr) => {
                         // Keep "Entries" as JSON string for batch operations
                         if key == "Entries" {
-                            let value_str = serde_json::to_string(value)
-                                .unwrap_or_else(|_| "[]".to_string());
+                            let value_str =
+                                serde_json::to_string(value).unwrap_or_else(|_| "[]".to_string());
                             params.insert(key.clone(), value_str);
                         } else {
                             // Expand other arrays into numbered parameters
                             // e.g., AttributeNames: ["All", "Policy"] becomes:
                             // AttributeName.1 = All, AttributeName.2 = Policy
                             let singular_key = if key.ends_with("s") {
-                                &key[..key.len()-1]  // Remove trailing 's'
+                                &key[..key.len() - 1] // Remove trailing 's'
                             } else {
                                 key.as_str()
                             };
@@ -355,21 +365,15 @@ impl SqsRequest {
             if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(entries_json) {
                 if let Some(arr) = json_value.as_array() {
                     for entry in arr {
-                        if let (Some(id), Some(body)) = (
-                            entry["Id"].as_str(),
-                            entry["MessageBody"].as_str(),
-                        ) {
-                            let delay_seconds = entry["DelaySeconds"]
-                                .as_u64()
-                                .map(|d| d as u32);
+                        if let (Some(id), Some(body)) =
+                            (entry["Id"].as_str(), entry["MessageBody"].as_str())
+                        {
+                            let delay_seconds = entry["DelaySeconds"].as_u64().map(|d| d as u32);
 
-                            let dedup_id = entry["MessageDeduplicationId"]
-                                .as_str()
-                                .map(String::from);
+                            let dedup_id =
+                                entry["MessageDeduplicationId"].as_str().map(String::from);
 
-                            let group_id = entry["MessageGroupId"]
-                                .as_str()
-                                .map(String::from);
+                            let group_id = entry["MessageGroupId"].as_str().map(String::from);
 
                             entries.push(SendMessageBatchEntry {
                                 id: id.to_string(),
@@ -399,11 +403,12 @@ impl SqsRequest {
 
             if let (Some(id), Some(body)) = (self.get_param(&id_key), self.get_param(&body_key)) {
                 let delay_key = format!("SendMessageBatchRequestEntry.{}.DelaySeconds", index);
-                let delay_seconds = self
-                    .get_param(&delay_key)
-                    .and_then(|s| s.parse().ok());
+                let delay_seconds = self.get_param(&delay_key).and_then(|s| s.parse().ok());
 
-                let dedup_id_key = format!("SendMessageBatchRequestEntry.{}.MessageDeduplicationId", index);
+                let dedup_id_key = format!(
+                    "SendMessageBatchRequestEntry.{}.MessageDeduplicationId",
+                    index
+                );
                 let dedup_id = self.get_param(&dedup_id_key).map(String::from);
 
                 let group_id_key = format!("SendMessageBatchRequestEntry.{}.MessageGroupId", index);
@@ -436,10 +441,9 @@ impl SqsRequest {
             if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(entries_json) {
                 if let Some(arr) = json_value.as_array() {
                     for entry in arr {
-                        if let (Some(id), Some(receipt_handle)) = (
-                            entry["Id"].as_str(),
-                            entry["ReceiptHandle"].as_str(),
-                        ) {
+                        if let (Some(id), Some(receipt_handle)) =
+                            (entry["Id"].as_str(), entry["ReceiptHandle"].as_str())
+                        {
                             entries.push(DeleteMessageBatchEntry {
                                 id: id.to_string(),
                                 receipt_handle: receipt_handle.to_string(),
@@ -461,7 +465,8 @@ impl SqsRequest {
             let id_key = format!("DeleteMessageBatchRequestEntry.{}.Id", index);
             let handle_key = format!("DeleteMessageBatchRequestEntry.{}.ReceiptHandle", index);
 
-            if let (Some(id), Some(handle)) = (self.get_param(&id_key), self.get_param(&handle_key)) {
+            if let (Some(id), Some(handle)) = (self.get_param(&id_key), self.get_param(&handle_key))
+            {
                 entries.push(DeleteMessageBatchEntry {
                     id: id.to_string(),
                     receipt_handle: handle.to_string(),
@@ -507,8 +512,14 @@ impl SqsRequest {
         let mut index = 1;
         loop {
             let id_key = format!("ChangeMessageVisibilityBatchRequestEntry.{}.Id", index);
-            let handle_key = format!("ChangeMessageVisibilityBatchRequestEntry.{}.ReceiptHandle", index);
-            let timeout_key = format!("ChangeMessageVisibilityBatchRequestEntry.{}.VisibilityTimeout", index);
+            let handle_key = format!(
+                "ChangeMessageVisibilityBatchRequestEntry.{}.ReceiptHandle",
+                index
+            );
+            let timeout_key = format!(
+                "ChangeMessageVisibilityBatchRequestEntry.{}.VisibilityTimeout",
+                index
+            );
 
             if let (Some(id), Some(handle), Some(timeout_str)) = (
                 self.get_param(&id_key),
@@ -689,7 +700,10 @@ mod tests {
         let req = SqsRequest::parse_with_headers(json_body, &headers).unwrap();
 
         assert_eq!(req.action, SqsAction::SendMessage);
-        assert_eq!(req.get_param("QueueUrl"), Some("http://localhost:9324/queue/test"));
+        assert_eq!(
+            req.get_param("QueueUrl"),
+            Some("http://localhost:9324/queue/test")
+        );
         assert_eq!(req.get_param("MessageBody"), Some("Hello JSON World"));
     }
 
@@ -719,9 +733,15 @@ mod tests {
 
         assert_eq!(attrs.len(), 2);
         assert_eq!(attrs.get("attr1").unwrap().data_type, "String");
-        assert_eq!(attrs.get("attr1").unwrap().string_value, Some("value1".to_string()));
+        assert_eq!(
+            attrs.get("attr1").unwrap().string_value,
+            Some("value1".to_string())
+        );
         assert_eq!(attrs.get("attr2").unwrap().data_type, "Number");
-        assert_eq!(attrs.get("attr2").unwrap().string_value, Some("123".to_string()));
+        assert_eq!(
+            attrs.get("attr2").unwrap().string_value,
+            Some("123".to_string())
+        );
     }
 
     #[test]
@@ -742,7 +762,10 @@ mod tests {
         let attrs = req.parse_queue_attributes();
 
         assert_eq!(attrs.get("VisibilityTimeout"), Some(&"60".to_string()));
-        assert_eq!(attrs.get("MessageRetentionPeriod"), Some(&"86400".to_string()));
+        assert_eq!(
+            attrs.get("MessageRetentionPeriod"),
+            Some(&"86400".to_string())
+        );
     }
 
     #[test]
@@ -764,7 +787,10 @@ mod tests {
             ]
         }"#;
         let mut headers = HeaderMap::new();
-        headers.insert("x-amz-target", "AmazonSQS.SendMessageBatch".parse().unwrap());
+        headers.insert(
+            "x-amz-target",
+            "AmazonSQS.SendMessageBatch".parse().unwrap(),
+        );
 
         let req = SqsRequest::parse_with_headers(json_body, &headers).unwrap();
         let entries = req.parse_send_message_batch_entries();
@@ -796,7 +822,10 @@ mod tests {
             ]
         }"#;
         let mut headers = HeaderMap::new();
-        headers.insert("x-amz-target", "AmazonSQS.DeleteMessageBatch".parse().unwrap());
+        headers.insert(
+            "x-amz-target",
+            "AmazonSQS.DeleteMessageBatch".parse().unwrap(),
+        );
 
         let req = SqsRequest::parse_with_headers(json_body, &headers).unwrap();
         let entries = req.parse_delete_message_batch_entries();
@@ -828,7 +857,10 @@ mod tests {
             ]
         }"#;
         let mut headers = HeaderMap::new();
-        headers.insert("x-amz-target", "AmazonSQS.ChangeMessageVisibilityBatch".parse().unwrap());
+        headers.insert(
+            "x-amz-target",
+            "AmazonSQS.ChangeMessageVisibilityBatch".parse().unwrap(),
+        );
 
         let req = SqsRequest::parse_with_headers(json_body, &headers).unwrap();
         let entries = req.parse_change_visibility_batch_entries();
@@ -851,7 +883,10 @@ mod tests {
             "AttributeNames": ["VisibilityTimeout", "MessageRetentionPeriod", "QueueArn"]
         }"#;
         let mut headers = HeaderMap::new();
-        headers.insert("x-amz-target", "AmazonSQS.GetQueueAttributes".parse().unwrap());
+        headers.insert(
+            "x-amz-target",
+            "AmazonSQS.GetQueueAttributes".parse().unwrap(),
+        );
 
         let req = SqsRequest::parse_with_headers(json_body, &headers).unwrap();
         let attr_names = req.parse_attribute_names();
@@ -908,8 +943,14 @@ mod tests {
 
         let attrs = req.parse_message_attributes();
         assert_eq!(attrs.len(), 2);
-        assert_eq!(attrs.get("attr1").unwrap().string_value, Some("value1".to_string()));
-        assert_eq!(attrs.get("attr2").unwrap().string_value, Some("42".to_string()));
+        assert_eq!(
+            attrs.get("attr1").unwrap().string_value,
+            Some("value1".to_string())
+        );
+        assert_eq!(
+            attrs.get("attr2").unwrap().string_value,
+            Some("42".to_string())
+        );
     }
 
     #[test]
@@ -951,7 +992,10 @@ mod tests {
         let entries = req.parse_send_message_batch_entries();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].message_group_id, Some("group1".to_string()));
-        assert_eq!(entries[0].message_deduplication_id, Some("dedup1".to_string()));
+        assert_eq!(
+            entries[0].message_deduplication_id,
+            Some("dedup1".to_string())
+        );
     }
 
     #[test]
@@ -962,12 +1006,17 @@ mod tests {
             Some("test-queue".to_string())
         );
         assert_eq!(
-            extract_queue_name_from_url("https://sqs.us-east-1.amazonaws.com/123456789012/my-queue"),
+            extract_queue_name_from_url(
+                "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue"
+            ),
             Some("my-queue".to_string())
         );
 
         // Invalid cases
-        assert_eq!(extract_queue_name_from_url("http://localhost:9324/queue/"), None);
+        assert_eq!(
+            extract_queue_name_from_url("http://localhost:9324/queue/"),
+            None
+        );
         assert_eq!(extract_queue_name_from_url("http://localhost:9324/"), None);
         assert_eq!(extract_queue_name_from_url(""), None);
     }

@@ -13,9 +13,11 @@
 use crate::error::{Error, Result};
 use crate::pubsub::proto::publisher_server::Publisher;
 use crate::pubsub::proto::*;
-use crate::pubsub::types::{validate_topic_id, ResourceName};
+use crate::pubsub::types::{ResourceName, validate_topic_id};
 use crate::storage::StorageBackend;
-use crate::types::{Message, MessageAttributeValue, MessageAttributes, MessageId, QueueConfig, QueueType};
+use crate::types::{
+    Message, MessageAttributeValue, MessageAttributes, MessageId, QueueConfig, QueueType,
+};
 use base64::Engine;
 use chrono::Utc;
 use std::sync::Arc;
@@ -36,7 +38,11 @@ impl PublisherService {
     /// Convert proto Topic to our internal QueueConfig.
     fn topic_to_queue_config(topic: &Topic) -> Result<QueueConfig> {
         let resource_name = ResourceName::parse(&topic.name)?;
-        let topic_id = format!("{}:{}", resource_name.project(), resource_name.resource_id());
+        let topic_id = format!(
+            "{}:{}",
+            resource_name.project(),
+            resource_name.resource_id()
+        );
 
         Ok(QueueConfig {
             id: topic_id.clone(),
@@ -74,10 +80,7 @@ impl PublisherService {
     }
 
     /// Convert proto PubsubMessage to our internal Message.
-    fn pubsub_message_to_message(
-        msg: &PubsubMessage,
-        topic_id: &str,
-    ) -> Message {
+    fn pubsub_message_to_message(msg: &PubsubMessage, topic_id: &str) -> Message {
         let mut attributes = MessageAttributes::new();
         for (key, value) in &msg.attributes {
             attributes.insert(
@@ -135,14 +138,16 @@ impl Publisher for PublisherService {
             .map_err(|e| Status::internal(format!("Failed to convert topic: {}", e)))?;
 
         // Create in backend
-        let created_config = self
-            .backend
-            .create_queue(queue_config)
-            .await
-            .map_err(|e| match e {
-                Error::QueueAlreadyExists(_) => Status::already_exists(format!("Topic already exists: {}", topic.name)),
-                _ => Status::internal(format!("Failed to create topic: {}", e)),
-            })?;
+        let created_config =
+            self.backend
+                .create_queue(queue_config)
+                .await
+                .map_err(|e| match e {
+                    Error::QueueAlreadyExists(_) => {
+                        Status::already_exists(format!("Topic already exists: {}", topic.name))
+                    }
+                    _ => Status::internal(format!("Failed to create topic: {}", e)),
+                })?;
 
         let response_topic = Self::queue_config_to_topic(&created_config);
         Ok(Response::new(response_topic))
@@ -154,7 +159,9 @@ impl Publisher for PublisherService {
         request: Request<UpdateTopicRequest>,
     ) -> std::result::Result<Response<Topic>, Status> {
         let req = request.into_inner();
-        let topic = req.topic.ok_or_else(|| Status::invalid_argument("Topic is required"))?;
+        let topic = req
+            .topic
+            .ok_or_else(|| Status::invalid_argument("Topic is required"))?;
 
         info!("UpdateTopic: {}", topic.name);
 
@@ -185,7 +192,11 @@ impl Publisher for PublisherService {
         let resource_name = ResourceName::parse(&req.topic)
             .map_err(|e| Status::invalid_argument(format!("Invalid topic name: {}", e)))?;
 
-        let topic_id = format!("{}:{}", resource_name.project(), resource_name.resource_id());
+        let topic_id = format!(
+            "{}:{}",
+            resource_name.project(),
+            resource_name.resource_id()
+        );
 
         // Verify topic exists
         self.backend
@@ -200,7 +211,10 @@ impl Publisher for PublisherService {
             debug!(
                 "Converting message: id={}, ordering_key={}",
                 message.id.0,
-                message.message_group_id.as_ref().unwrap_or(&"<none>".to_string())
+                message
+                    .message_group_id
+                    .as_ref()
+                    .unwrap_or(&"<none>".to_string())
             );
             messages.push(message);
         }
@@ -254,7 +268,12 @@ impl Publisher for PublisherService {
                     .backend
                     .send_messages(&sub.id, sub_messages)
                     .await
-                    .map_err(|e| Status::internal(format!("Failed to publish messages to subscription {}: {}", sub.id, e)))?;
+                    .map_err(|e| {
+                        Status::internal(format!(
+                            "Failed to publish messages to subscription {}: {}",
+                            sub.id, e
+                        ))
+                    })?;
 
                 debug!(
                     "Published {} messages to subscription {}, message_ids: {:?}",
@@ -287,7 +306,11 @@ impl Publisher for PublisherService {
         let resource_name = ResourceName::parse(&req.topic)
             .map_err(|e| Status::invalid_argument(format!("Invalid topic name: {}", e)))?;
 
-        let topic_id = format!("{}:{}", resource_name.project(), resource_name.resource_id());
+        let topic_id = format!(
+            "{}:{}",
+            resource_name.project(),
+            resource_name.resource_id()
+        );
 
         // Get from backend
         let config = self
@@ -309,7 +332,8 @@ impl Publisher for PublisherService {
         debug!("ListTopics: project={}", req.project);
 
         // Extract project ID from "projects/{project}" format
-        let project_id = req.project
+        let project_id = req
+            .project
             .strip_prefix("projects/")
             .unwrap_or(&req.project);
 
@@ -354,7 +378,11 @@ impl Publisher for PublisherService {
         let resource_name = ResourceName::parse(&req.topic)
             .map_err(|e| Status::invalid_argument(format!("Invalid topic name: {}", e)))?;
 
-        let topic_id = format!("{}:{}", resource_name.project(), resource_name.resource_id());
+        let topic_id = format!(
+            "{}:{}",
+            resource_name.project(),
+            resource_name.resource_id()
+        );
 
         // Verify topic exists
         self.backend
@@ -395,7 +423,11 @@ impl Publisher for PublisherService {
         let resource_name = ResourceName::parse(&req.topic)
             .map_err(|e| Status::invalid_argument(format!("Invalid topic name: {}", e)))?;
 
-        let topic_id = format!("{}:{}", resource_name.project(), resource_name.resource_id());
+        let topic_id = format!(
+            "{}:{}",
+            resource_name.project(),
+            resource_name.resource_id()
+        );
 
         // Delete from backend
         self.backend
@@ -416,7 +448,9 @@ impl Publisher for PublisherService {
 
         // TODO: Implement subscription detachment
         // For now, return not implemented
-        Err(Status::unimplemented("DetachSubscription not yet implemented"))
+        Err(Status::unimplemented(
+            "DetachSubscription not yet implemented",
+        ))
     }
 }
 
@@ -441,7 +475,9 @@ mod tests {
     fn test_topic_to_queue_config_conversion() {
         let topic = Topic {
             name: "projects/test-project/topics/test-topic".to_string(),
-            labels: [("env".to_string(), "test".to_string())].into_iter().collect(),
+            labels: [("env".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
             message_retention_duration: Some(prost_types::Duration {
                 seconds: 86400,
                 nanos: 0,
@@ -474,7 +510,9 @@ mod tests {
             delay_seconds: 0,
             dlq_config: None,
             content_based_deduplication: false,
-            tags: [("key".to_string(), "value".to_string())].into_iter().collect(),
+            tags: [("key".to_string(), "value".to_string())]
+                .into_iter()
+                .collect(),
             redrive_allow_policy: None,
         };
 
@@ -489,7 +527,9 @@ mod tests {
     fn test_pubsub_message_to_message_conversion() {
         let pubsub_msg = PubsubMessage {
             data: b"Hello world".to_vec(),
-            attributes: [("attr1".to_string(), "value1".to_string())].into_iter().collect(),
+            attributes: [("attr1".to_string(), "value1".to_string())]
+                .into_iter()
+                .collect(),
             message_id: String::new(),
             publish_time: None,
             ordering_key: "order-key-1".to_string(),
@@ -498,12 +538,23 @@ mod tests {
         let message = PublisherService::pubsub_message_to_message(&pubsub_msg, "topic:test");
 
         // Body should be base64 encoded
-        let decoded = base64::engine::general_purpose::STANDARD.decode(&message.body).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&message.body)
+            .unwrap();
         assert_eq!(decoded, b"Hello world");
 
         assert_eq!(message.queue_id, "topic:test");
         assert_eq!(message.message_group_id, Some("order-key-1".to_string()));
-        assert_eq!(message.attributes.get("attr1").unwrap().string_value.as_ref().unwrap(), "value1");
+        assert_eq!(
+            message
+                .attributes
+                .get("attr1")
+                .unwrap()
+                .string_value
+                .as_ref()
+                .unwrap(),
+            "value1"
+        );
         assert_eq!(message.receive_count, 0);
     }
 
@@ -532,7 +583,9 @@ mod tests {
 
         let topic = Topic {
             name: "projects/test-project/topics/my-topic".to_string(),
-            labels: [("env".to_string(), "dev".to_string())].into_iter().collect(),
+            labels: [("env".to_string(), "dev".to_string())]
+                .into_iter()
+                .collect(),
             message_retention_duration: None,
             message_storage_policy: None,
             kms_key_name: String::new(),
@@ -630,7 +683,9 @@ mod tests {
         // Create topic first
         let topic = Topic {
             name: "projects/test-project/topics/update-topic".to_string(),
-            labels: [("version".to_string(), "v1".to_string())].into_iter().collect(),
+            labels: [("version".to_string(), "v1".to_string())]
+                .into_iter()
+                .collect(),
             message_retention_duration: None,
             message_storage_policy: None,
             kms_key_name: String::new(),
@@ -643,7 +698,9 @@ mod tests {
         // Update with new labels
         let updated_topic = Topic {
             name: "projects/test-project/topics/update-topic".to_string(),
-            labels: [("version".to_string(), "v2".to_string())].into_iter().collect(),
+            labels: [("version".to_string(), "v2".to_string())]
+                .into_iter()
+                .collect(),
             message_retention_duration: Some(prost_types::Duration {
                 seconds: 172800,
                 nanos: 0,
@@ -664,7 +721,10 @@ mod tests {
         let result_topic = response.into_inner();
 
         assert_eq!(result_topic.labels.get("version").unwrap(), "v2");
-        assert_eq!(result_topic.message_retention_duration.unwrap().seconds, 172800);
+        assert_eq!(
+            result_topic.message_retention_duration.unwrap().seconds,
+            172800
+        );
     }
 
     #[tokio::test]
@@ -695,7 +755,9 @@ mod tests {
         // Create topic first
         let topic = Topic {
             name: "projects/test-project/topics/get-topic".to_string(),
-            labels: [("key".to_string(), "value".to_string())].into_iter().collect(),
+            labels: [("key".to_string(), "value".to_string())]
+                .into_iter()
+                .collect(),
             message_retention_duration: None,
             message_storage_policy: None,
             kms_key_name: String::new(),
@@ -714,7 +776,10 @@ mod tests {
         let response = service.get_topic(request).await.unwrap();
         let retrieved_topic = response.into_inner();
 
-        assert_eq!(retrieved_topic.name, "projects/test-project/topics/get-topic");
+        assert_eq!(
+            retrieved_topic.name,
+            "projects/test-project/topics/get-topic"
+        );
         assert_eq!(retrieved_topic.labels.get("key").unwrap(), "value");
     }
 
@@ -877,15 +942,13 @@ mod tests {
         // Publish messages (no subscriptions)
         let publish_request = PublishRequest {
             topic: "projects/test-project/topics/pub-topic".to_string(),
-            messages: vec![
-                PubsubMessage {
-                    data: b"Message 1".to_vec(),
-                    attributes: Default::default(),
-                    message_id: String::new(),
-                    publish_time: None,
-                    ordering_key: String::new(),
-                },
-            ],
+            messages: vec![PubsubMessage {
+                data: b"Message 1".to_vec(),
+                attributes: Default::default(),
+                message_id: String::new(),
+                publish_time: None,
+                ordering_key: String::new(),
+            }],
         };
 
         let request = Request::new(publish_request);
@@ -926,7 +989,11 @@ mod tests {
             tags: Default::default(),
             redrive_allow_policy: None,
         };
-        service.backend.create_queue(sub_queue_config).await.unwrap();
+        service
+            .backend
+            .create_queue(sub_queue_config)
+            .await
+            .unwrap();
 
         // Create subscription for the topic
         let sub_config = SubscriptionConfig {
@@ -939,20 +1006,24 @@ mod tests {
             filter: None,
             dead_letter_policy: None,
         };
-        service.backend.create_subscription(sub_config).await.unwrap();
+        service
+            .backend
+            .create_subscription(sub_config)
+            .await
+            .unwrap();
 
         // Publish messages
         let publish_request = PublishRequest {
             topic: "projects/test-project/topics/fanout-topic".to_string(),
-            messages: vec![
-                PubsubMessage {
-                    data: b"Fanout message".to_vec(),
-                    attributes: [("key".to_string(), "value".to_string())].into_iter().collect(),
-                    message_id: String::new(),
-                    publish_time: None,
-                    ordering_key: String::new(),
-                },
-            ],
+            messages: vec![PubsubMessage {
+                data: b"Fanout message".to_vec(),
+                attributes: [("key".to_string(), "value".to_string())]
+                    .into_iter()
+                    .collect(),
+                message_id: String::new(),
+                publish_time: None,
+                ordering_key: String::new(),
+            }],
         };
 
         let request = Request::new(publish_request);
@@ -962,19 +1033,25 @@ mod tests {
         assert_eq!(publish_response.message_ids.len(), 1);
 
         // Verify message was fanned out to subscription
-        let messages = service.backend
-            .receive_messages("test-project:test-sub", crate::types::ReceiveOptions {
-                max_messages: 10,
-                visibility_timeout: Some(30),
-                wait_time_seconds: 0,
-                attribute_names: vec![],
-                message_attribute_names: vec![],
-            })
+        let messages = service
+            .backend
+            .receive_messages(
+                "test-project:test-sub",
+                crate::types::ReceiveOptions {
+                    max_messages: 10,
+                    visibility_timeout: Some(30),
+                    wait_time_seconds: 0,
+                    attribute_names: vec![],
+                    message_attribute_names: vec![],
+                },
+            )
             .await
             .unwrap();
 
         assert_eq!(messages.len(), 1);
-        let decoded = base64::engine::general_purpose::STANDARD.decode(&messages[0].message.body).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&messages[0].message.body)
+            .unwrap();
         assert_eq!(decoded, b"Fanout message");
     }
 
@@ -984,15 +1061,13 @@ mod tests {
 
         let publish_request = PublishRequest {
             topic: "projects/test-project/topics/nonexistent".to_string(),
-            messages: vec![
-                PubsubMessage {
-                    data: b"test".to_vec(),
-                    attributes: Default::default(),
-                    message_id: String::new(),
-                    publish_time: None,
-                    ordering_key: String::new(),
-                },
-            ],
+            messages: vec![PubsubMessage {
+                data: b"test".to_vec(),
+                attributes: Default::default(),
+                message_id: String::new(),
+                publish_time: None,
+                ordering_key: String::new(),
+            }],
         };
 
         let request = Request::new(publish_request);
@@ -1022,15 +1097,13 @@ mod tests {
         // Publish messages with ordering key
         let publish_request = PublishRequest {
             topic: "projects/test-project/topics/ordered-topic".to_string(),
-            messages: vec![
-                PubsubMessage {
-                    data: b"Ordered message".to_vec(),
-                    attributes: Default::default(),
-                    message_id: String::new(),
-                    publish_time: None,
-                    ordering_key: "order-key-1".to_string(),
-                },
-            ],
+            messages: vec![PubsubMessage {
+                data: b"Ordered message".to_vec(),
+                attributes: Default::default(),
+                message_id: String::new(),
+                publish_time: None,
+                ordering_key: "order-key-1".to_string(),
+            }],
         };
 
         let request = Request::new(publish_request);
@@ -1237,4 +1310,3 @@ mod tests {
         assert_eq!(status.code(), tonic::Code::Unimplemented);
     }
 }
-

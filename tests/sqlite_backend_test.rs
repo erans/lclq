@@ -1,8 +1,8 @@
 //! Integration tests for SQLite storage backend.
 
 use chrono::Utc;
-use lclq::storage::sqlite::{SqliteBackend, SqliteConfig};
 use lclq::storage::StorageBackend;
+use lclq::storage::sqlite::{SqliteBackend, SqliteConfig};
 use lclq::types::{Message, MessageId, QueueConfig, QueueType, ReceiveOptions};
 
 /// Test basic queue operations with SQLite backend.

@@ -1,7 +1,7 @@
 //! Storage backend traits and implementations.
 
-use crate::types::{Message, QueueConfig, QueueStats, ReceiveOptions, SubscriptionConfig};
 use crate::Result;
+use crate::types::{Message, QueueConfig, QueueStats, ReceiveOptions, SubscriptionConfig};
 use async_trait::async_trait;
 
 pub mod memory;
@@ -46,8 +46,7 @@ pub trait StorageBackend: Send + Sync {
     async fn send_message(&self, queue_id: &str, message: Message) -> Result<Message>;
 
     /// Send multiple messages to a queue.
-    async fn send_messages(&self, queue_id: &str, messages: Vec<Message>)
-        -> Result<Vec<Message>>;
+    async fn send_messages(&self, queue_id: &str, messages: Vec<Message>) -> Result<Vec<Message>>;
 
     /// Receive messages from a queue.
     async fn receive_messages(
@@ -74,8 +73,7 @@ pub trait StorageBackend: Send + Sync {
     async fn get_stats(&self, queue_id: &str) -> Result<QueueStats>;
 
     /// Create a subscription (for Pub/Sub).
-    async fn create_subscription(&self, config: SubscriptionConfig)
-        -> Result<SubscriptionConfig>;
+    async fn create_subscription(&self, config: SubscriptionConfig) -> Result<SubscriptionConfig>;
 
     /// Get a subscription by ID.
     async fn get_subscription(&self, id: &str) -> Result<SubscriptionConfig>;

@@ -224,10 +224,7 @@ mod tests {
 
         // Verify round-trip
         assert_eq!(deserialized.server.sqs_port, config.server.sqs_port);
-        assert_eq!(
-            deserialized.server.bind_address,
-            config.server.bind_address
-        );
+        assert_eq!(deserialized.server.bind_address, config.server.bind_address);
     }
 
     #[test]

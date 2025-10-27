@@ -109,7 +109,10 @@ mod tests {
 
         let result = start_grpc_server(config, backend, shutdown_rx).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), crate::error::Error::Config(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::error::Error::Config(_)
+        ));
     }
 
     #[tokio::test]
@@ -121,9 +124,8 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
 
         // Start server in background
-        let server_handle = tokio::spawn(async move {
-            start_grpc_server(config, backend, shutdown_rx).await
-        });
+        let server_handle =
+            tokio::spawn(async move { start_grpc_server(config, backend, shutdown_rx).await });
 
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -132,10 +134,7 @@ mod tests {
         let _ = shutdown_tx.send(());
 
         // Wait for server to shutdown gracefully
-        let result = tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            server_handle
-        ).await;
+        let result = tokio::time::timeout(tokio::time::Duration::from_secs(5), server_handle).await;
 
         assert!(result.is_ok());
         let server_result = result.unwrap().unwrap();
@@ -154,9 +153,8 @@ mod tests {
         let shutdown_rx = signal.subscribe();
 
         // Start server
-        let server_handle = tokio::spawn(async move {
-            start_grpc_server(config, backend, shutdown_rx).await
-        });
+        let server_handle =
+            tokio::spawn(async move { start_grpc_server(config, backend, shutdown_rx).await });
 
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -165,10 +163,7 @@ mod tests {
         signal.shutdown();
 
         // Wait for graceful shutdown
-        let result = tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            server_handle
-        ).await;
+        let result = tokio::time::timeout(tokio::time::Duration::from_secs(5), server_handle).await;
 
         assert!(result.is_ok());
     }
@@ -186,4 +181,3 @@ mod tests {
         drop(subscriber);
     }
 }
-

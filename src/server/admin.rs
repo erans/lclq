@@ -2,11 +2,11 @@
 use std::sync::Arc;
 
 use axum::{
+    Router,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Json, Response},
     routing::{delete, get, post},
-    Router,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -155,7 +155,9 @@ async fn get_stats(State(state): State<AdminState>) -> Result<Json<StatsResponse
 }
 
 /// List all queues endpoint
-async fn list_queues(State(state): State<AdminState>) -> Result<Json<QueueListResponse>, AdminError> {
+async fn list_queues(
+    State(state): State<AdminState>,
+) -> Result<Json<QueueListResponse>, AdminError> {
     let queues = state.backend.list_queues(None).await?;
 
     let mut queue_summaries = Vec::new();
@@ -345,8 +347,8 @@ fn create_router(backend: Arc<dyn StorageBackend>) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::memory::InMemoryBackend;
     use crate::storage::StorageBackend;
+    use crate::storage::memory::InMemoryBackend;
     use crate::types::{QueueConfig, QueueType};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
@@ -888,10 +890,7 @@ mod tests {
         let _ = shutdown_tx.send(());
 
         // Wait for graceful shutdown
-        let result = tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            server_handle
-        ).await;
+        let result = tokio::time::timeout(tokio::time::Duration::from_secs(5), server_handle).await;
 
         assert!(result.is_ok());
         assert!(result.unwrap().unwrap().is_ok());

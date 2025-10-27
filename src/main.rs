@@ -1,4 +1,4 @@
-use lclq::cli::{commands, Cli};
+use lclq::cli::{Cli, commands};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

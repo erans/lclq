@@ -3,12 +3,12 @@
 use std::sync::Arc;
 
 use axum::{
+    Router,
     body::Bytes,
     extract::State,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::post,
-    Router,
 };
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info};
@@ -68,11 +68,7 @@ async fn handle_sqs_request(
         Ok(s) => s,
         Err(e) => {
             error!(error = %e, "Failed to parse request body as UTF-8");
-            return (
-                StatusCode::BAD_REQUEST,
-                "Invalid request body encoding",
-            )
-                .into_response();
+            return (StatusCode::BAD_REQUEST, "Invalid request body encoding").into_response();
         }
     };
 
@@ -81,8 +77,7 @@ async fn handle_sqs_request(
         Ok(req) => req,
         Err(e) => {
             error!(error = %e, "Failed to parse SQS request");
-            return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e))
-                .into_response();
+            return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)).into_response();
         }
     };
 
@@ -172,7 +167,9 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         // Verify response contains queue URL
-        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let body_str = std::str::from_utf8(&body_bytes).unwrap();
         assert!(body_str.contains("QueueUrl"));
         assert!(body_str.contains("test-queue"));
@@ -196,7 +193,9 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let body_str = std::str::from_utf8(&body_bytes).unwrap();
         assert!(body_str.contains("Invalid request body encoding"));
     }
@@ -216,7 +215,9 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let body_str = std::str::from_utf8(&body_bytes).unwrap();
         assert!(body_str.contains("Invalid request"));
     }
@@ -236,7 +237,9 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let body_str = std::str::from_utf8(&body_bytes).unwrap();
         assert!(body_str.contains("Invalid request"));
     }
@@ -257,7 +260,9 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let body_str = std::str::from_utf8(&body_bytes).unwrap();
         assert!(body_str.contains("Invalid request"));
     }
@@ -290,7 +295,9 @@ mod tests {
         let send_response = app.clone().oneshot(send_request).await.unwrap();
         assert_eq!(send_response.status(), StatusCode::OK);
 
-        let send_body = axum::body::to_bytes(send_response.into_body(), usize::MAX).await.unwrap();
+        let send_body = axum::body::to_bytes(send_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let send_str = std::str::from_utf8(&send_body).unwrap();
         assert!(send_str.contains("MessageId"));
 
@@ -300,14 +307,16 @@ mod tests {
             .uri("/")
             .header("content-type", "application/x-www-form-urlencoded")
             .body(Body::from(
-                "Action=ReceiveMessage&QueueUrl=http://localhost:9324/queue/test-queue-msg"
+                "Action=ReceiveMessage&QueueUrl=http://localhost:9324/queue/test-queue-msg",
             ))
             .unwrap();
 
         let receive_response = app.oneshot(receive_request).await.unwrap();
         assert_eq!(receive_response.status(), StatusCode::OK);
 
-        let receive_body = axum::body::to_bytes(receive_response.into_body(), usize::MAX).await.unwrap();
+        let receive_body = axum::body::to_bytes(receive_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let receive_str = std::str::from_utf8(&receive_body).unwrap();
         assert!(receive_str.contains("Hello"));
     }
@@ -368,9 +377,8 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
         // Start server in background
-        let server_handle = tokio::spawn(async move {
-            start_sqs_server(backend, config, shutdown_rx).await
-        });
+        let server_handle =
+            tokio::spawn(async move { start_sqs_server(backend, config, shutdown_rx).await });
 
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -379,10 +387,7 @@ mod tests {
         let _ = shutdown_tx.send(());
 
         // Wait for server to shutdown gracefully
-        let result = tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            server_handle
-        ).await;
+        let result = tokio::time::timeout(tokio::time::Duration::from_secs(5), server_handle).await;
 
         assert!(result.is_ok());
         let server_result = result.unwrap().unwrap();
@@ -401,9 +406,8 @@ mod tests {
         let shutdown_rx = signal.subscribe();
 
         // Start server
-        let server_handle = tokio::spawn(async move {
-            start_sqs_server(backend, config, shutdown_rx).await
-        });
+        let server_handle =
+            tokio::spawn(async move { start_sqs_server(backend, config, shutdown_rx).await });
 
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -412,10 +416,7 @@ mod tests {
         signal.shutdown();
 
         // Wait for graceful shutdown
-        let result = tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            server_handle
-        ).await;
+        let result = tokio::time::timeout(tokio::time::Duration::from_secs(5), server_handle).await;
 
         assert!(result.is_ok());
     }

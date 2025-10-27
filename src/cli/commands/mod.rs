@@ -2,7 +2,7 @@
 /// Start command implementation
 pub mod start;
 
-use crate::cli::{output::*, Commands, QueueCommands};
+use crate::cli::{Commands, QueueCommands, output::*};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use tabled::Tabled;
@@ -58,7 +58,10 @@ struct QueueDetailsResponse {
 
 /// Display function for Option types in tables
 fn display_option<T: std::fmt::Display>(option: &Option<T>) -> String {
-    option.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "-".to_string())
+    option
+        .as_ref()
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "-".to_string())
 }
 
 /// Create queue request
@@ -93,7 +96,8 @@ pub async fn execute_command(command: Commands) -> anyhow::Result<()> {
                 db_path,
                 disable_sqs,
                 disable_pubsub,
-            ).await
+            )
+            .await
         }
         Commands::Queue(queue_cmd) => execute_queue_command(queue_cmd).await,
         Commands::Health { admin_url } => execute_health(admin_url).await,
@@ -120,10 +124,8 @@ async fn execute_queue_command(command: QueueCommands) -> anyhow::Result<()> {
                 anyhow::bail!("API error ({}): {}", status, error_text);
             }
 
-            let queue_list: QueueListResponse = response
-                .json()
-                .await
-                .context("Failed to parse response")?;
+            let queue_list: QueueListResponse =
+                response.json().await.context("Failed to parse response")?;
 
             let output_format = OutputFormat::parse(&format);
             print_list(&queue_list.queues, output_format)?;
@@ -148,10 +150,8 @@ async fn execute_queue_command(command: QueueCommands) -> anyhow::Result<()> {
                 anyhow::bail!("API error ({}): {}", status, error_text);
             }
 
-            let queue_details: QueueDetailsResponse = response
-                .json()
-                .await
-                .context("Failed to parse response")?;
+            let queue_details: QueueDetailsResponse =
+                response.json().await.context("Failed to parse response")?;
 
             print_success(&format!("Queue '{}' created successfully", name));
             println!("\nQueue Details:");
@@ -212,10 +212,8 @@ async fn execute_queue_command(command: QueueCommands) -> anyhow::Result<()> {
                 anyhow::bail!("API error ({}): {}", status, error_text);
             }
 
-            let queue_details: QueueDetailsResponse = response
-                .json()
-                .await
-                .context("Failed to parse response")?;
+            let queue_details: QueueDetailsResponse =
+                response.json().await.context("Failed to parse response")?;
 
             println!("Queue Statistics for '{}':", name);
             print_output(&queue_details, OutputFormat::Table)?;
@@ -240,10 +238,7 @@ async fn execute_health(admin_url: String) -> anyhow::Result<()> {
         anyhow::bail!("API error ({}): {}", status, error_text);
     }
 
-    let health: HealthResponse = response
-        .json()
-        .await
-        .context("Failed to parse response")?;
+    let health: HealthResponse = response.json().await.context("Failed to parse response")?;
 
     if health.status == "healthy" {
         print_success(&format!("Server is {}", health.status));
@@ -272,10 +267,7 @@ async fn execute_stats(admin_url: String) -> anyhow::Result<()> {
         anyhow::bail!("API error ({}): {}", status, error_text);
     }
 
-    let stats: StatsResponse = response
-        .json()
-        .await
-        .context("Failed to parse response")?;
+    let stats: StatsResponse = response.json().await.context("Failed to parse response")?;
 
     println!("Overall Statistics:");
     print_output(&stats, OutputFormat::Table)?;

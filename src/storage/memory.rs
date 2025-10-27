@@ -393,11 +393,7 @@ impl StorageBackend for InMemoryBackend {
         self.send_message_locked(queue, queue_id, message).await
     }
 
-    async fn send_messages(
-        &self,
-        queue_id: &str,
-        messages: Vec<Message>,
-    ) -> Result<Vec<Message>> {
+    async fn send_messages(&self, queue_id: &str, messages: Vec<Message>) -> Result<Vec<Message>> {
         // Check eviction before acquiring write lock
         self.maybe_evict().await?;
 
@@ -491,9 +487,8 @@ impl StorageBackend for InMemoryBackend {
                     continue; // Don't return the message
                 }
 
-                let receipt_handle = generate_receipt_handle(&queue_id, &message.id);
-                let visibility_expires_at =
-                    now + Duration::seconds(visibility_timeout as i64);
+                let receipt_handle = generate_receipt_handle(queue_id, &message.id);
+                let visibility_expires_at = now + Duration::seconds(visibility_timeout as i64);
 
                 queue.in_flight_messages.insert(
                     receipt_handle.clone(),
@@ -569,8 +564,7 @@ impl StorageBackend for InMemoryBackend {
             .get_mut(receipt_handle)
             .ok_or(Error::InvalidReceiptHandle)?;
 
-        in_flight.visibility_expires_at =
-            Utc::now() + Duration::seconds(visibility_timeout as i64);
+        in_flight.visibility_expires_at = Utc::now() + Duration::seconds(visibility_timeout as i64);
 
         debug!(queue_id = %queue_id, "Visibility changed");
         Ok(())
@@ -584,8 +578,7 @@ impl StorageBackend for InMemoryBackend {
             .get_mut(queue_id)
             .ok_or_else(|| Error::QueueNotFound(queue_id.to_string()))?;
 
-        let message_count =
-            queue.available_messages.len() + queue.in_flight_messages.len();
+        let message_count = queue.available_messages.len() + queue.in_flight_messages.len();
 
         queue.available_messages.clear();
         queue.in_flight_messages.clear();
@@ -613,10 +606,7 @@ impl StorageBackend for InMemoryBackend {
         })
     }
 
-    async fn create_subscription(
-        &self,
-        config: SubscriptionConfig,
-    ) -> Result<SubscriptionConfig> {
+    async fn create_subscription(&self, config: SubscriptionConfig) -> Result<SubscriptionConfig> {
         debug!(subscription_id = %config.id, topic_id = %config.topic_id, "Creating subscription");
 
         let mut subscriptions = self.inner.subscriptions.write().await;
@@ -717,11 +707,19 @@ mod tests {
         let queue_config = create_test_queue_config(QueueType::SqsStandard);
         backend.create_queue(queue_config).await.unwrap();
 
-        backend.send_message("test-queue", create_test_message("msg1")).await.unwrap();
-        backend.send_message("test-queue", create_test_message("msg2")).await.unwrap();
+        backend
+            .send_message("test-queue", create_test_message("msg1"))
+            .await
+            .unwrap();
+        backend
+            .send_message("test-queue", create_test_message("msg2"))
+            .await
+            .unwrap();
 
         // Next message should be rejected
-        let result = backend.send_message("test-queue", create_test_message("msg3")).await;
+        let result = backend
+            .send_message("test-queue", create_test_message("msg3"))
+            .await;
         assert!(result.is_err());
         match result {
             Err(Error::StorageError(msg)) => {
@@ -744,11 +742,20 @@ mod tests {
         let queue_config = create_test_queue_config(QueueType::SqsStandard);
         backend.create_queue(queue_config).await.unwrap();
 
-        backend.send_message("test-queue", create_test_message("msg1")).await.unwrap();
-        backend.send_message("test-queue", create_test_message("msg2")).await.unwrap();
+        backend
+            .send_message("test-queue", create_test_message("msg1"))
+            .await
+            .unwrap();
+        backend
+            .send_message("test-queue", create_test_message("msg2"))
+            .await
+            .unwrap();
 
         // Trigger eviction (should evict oldest accessed message)
-        backend.send_message("test-queue", create_test_message("msg3")).await.unwrap();
+        backend
+            .send_message("test-queue", create_test_message("msg3"))
+            .await
+            .unwrap();
 
         // Check stats - should still have 2 messages
         let stats = backend.get_stats("test-queue").await.unwrap();
@@ -768,12 +775,21 @@ mod tests {
         let queue_config = create_test_queue_config(QueueType::SqsStandard);
         backend.create_queue(queue_config).await.unwrap();
 
-        backend.send_message("test-queue", create_test_message("msg1")).await.unwrap();
+        backend
+            .send_message("test-queue", create_test_message("msg1"))
+            .await
+            .unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        backend.send_message("test-queue", create_test_message("msg2")).await.unwrap();
+        backend
+            .send_message("test-queue", create_test_message("msg2"))
+            .await
+            .unwrap();
 
         // Trigger eviction (should evict oldest sent message)
-        backend.send_message("test-queue", create_test_message("msg3")).await.unwrap();
+        backend
+            .send_message("test-queue", create_test_message("msg3"))
+            .await
+            .unwrap();
 
         // Check stats - should still have 2 messages
         let stats = backend.get_stats("test-queue").await.unwrap();
@@ -800,7 +816,10 @@ mod tests {
         msg1.queue_id = "test-fifo.fifo".to_string();
         msg1.message_group_id = Some("group1".to_string());
 
-        backend.send_message("test-fifo.fifo", msg1.clone()).await.unwrap();
+        backend
+            .send_message("test-fifo.fifo", msg1.clone())
+            .await
+            .unwrap();
 
         // Send duplicate message (same content)
         let mut msg2 = create_test_message("test content");
@@ -926,7 +945,9 @@ mod tests {
         backend.create_queue(queue_config).await.unwrap();
 
         // Try to change visibility with invalid receipt handle
-        let result = backend.change_visibility("test-queue", "invalid-handle", 60).await;
+        let result = backend
+            .change_visibility("test-queue", "invalid-handle", 60)
+            .await;
 
         assert!(result.is_err());
     }
@@ -944,20 +965,26 @@ mod tests {
         backend.create_queue(queue_config).await.unwrap();
 
         // Send a message
-        backend.send_message("test-queue", create_test_message("test")).await.unwrap();
+        backend
+            .send_message("test-queue", create_test_message("test"))
+            .await
+            .unwrap();
 
         // Receive it multiple times to exceed max receive count
         for _ in 0..3 {
-            let messages = backend.receive_messages(
-                "test-queue",
-                ReceiveOptions {
-                    max_messages: 1,
-                    visibility_timeout: Some(1),
-                    wait_time_seconds: 0,
-                    attribute_names: vec![],
-                    message_attribute_names: vec![],
-                },
-            ).await.unwrap();
+            let messages = backend
+                .receive_messages(
+                    "test-queue",
+                    ReceiveOptions {
+                        max_messages: 1,
+                        visibility_timeout: Some(1),
+                        wait_time_seconds: 0,
+                        attribute_names: vec![],
+                        message_attribute_names: vec![],
+                    },
+                )
+                .await
+                .unwrap();
 
             if !messages.is_empty() {
                 // Wait for visibility to expire

@@ -140,10 +140,7 @@ mod tests {
         let _ = shutdown_tx.send(());
 
         // The receiver task should complete
-        let result = tokio::time::timeout(
-            tokio::time::Duration::from_secs(1),
-            handle
-        ).await;
+        let result = tokio::time::timeout(tokio::time::Duration::from_secs(1), handle).await;
 
         assert!(result.is_ok());
     }
@@ -169,10 +166,7 @@ mod tests {
             shutdown_receiver(shutdown_rx).await;
         });
 
-        let result = tokio::time::timeout(
-            tokio::time::Duration::from_millis(100),
-            handle
-        ).await;
+        let result = tokio::time::timeout(tokio::time::Duration::from_millis(100), handle).await;
 
         assert!(result.is_ok());
     }

@@ -16,13 +16,13 @@
 use crate::error::Result;
 use crate::pubsub::proto::subscriber_server::Subscriber;
 use crate::pubsub::proto::*;
-use crate::pubsub::types::{validate_subscription_id, ResourceName};
+use crate::pubsub::types::{ResourceName, validate_subscription_id};
 use crate::storage::StorageBackend;
 use crate::types::{QueueConfig, QueueType, ReceiveOptions, SubscriptionConfig};
 use base64::Engine;
 use std::sync::Arc;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info};
 
@@ -113,12 +113,13 @@ impl SubscriberService {
             enable_message_ordering: config.enable_message_ordering,
             expiration_policy: None,
             filter: config.filter.clone().unwrap_or_default(),
-            dead_letter_policy: config.dead_letter_policy.as_ref().map(|dlp| {
-                DeadLetterPolicy {
+            dead_letter_policy: config
+                .dead_letter_policy
+                .as_ref()
+                .map(|dlp| DeadLetterPolicy {
                     dead_letter_topic: dlp.dead_letter_topic.clone(),
                     max_delivery_attempts: dlp.max_delivery_attempts as i32,
-                }
-            }),
+                }),
             retry_policy: None,
             detached: false,
             enable_exactly_once_delivery: false,
@@ -170,7 +171,7 @@ impl Subscriber for SubscriberService {
             name: config.name.clone(),
             queue_type: QueueType::PubSubTopic, // Subscriptions use PubSubTopic queue type
             visibility_timeout: config.ack_deadline_seconds,
-            message_retention_period: 604800, // 7 days
+            message_retention_period: 604800,   // 7 days
             max_message_size: 10 * 1024 * 1024, // 10 MB
             delay_seconds: 0,
             dlq_config: None,
@@ -205,9 +206,8 @@ impl Subscriber for SubscriberService {
         debug!("GetSubscription: {}", req.subscription);
 
         // Parse subscription name
-        let resource_name = ResourceName::parse(&req.subscription).map_err(|e| {
-            Status::invalid_argument(format!("Invalid subscription name: {}", e))
-        })?;
+        let resource_name = ResourceName::parse(&req.subscription)
+            .map_err(|e| Status::invalid_argument(format!("Invalid subscription name: {}", e)))?;
 
         let sub_id = format!(
             "{}:{}",
@@ -216,11 +216,9 @@ impl Subscriber for SubscriberService {
         );
 
         // Get from backend
-        let config = self
-            .backend
-            .get_subscription(&sub_id)
-            .await
-            .map_err(|_| Status::not_found(format!("Subscription not found: {}", req.subscription)))?;
+        let config = self.backend.get_subscription(&sub_id).await.map_err(|_| {
+            Status::not_found(format!("Subscription not found: {}", req.subscription))
+        })?;
 
         let subscription = Self::config_to_subscription(&config);
         Ok(Response::new(subscription))
@@ -233,7 +231,9 @@ impl Subscriber for SubscriberService {
     ) -> std::result::Result<Response<Subscription>, Status> {
         let _req = request.into_inner();
         // TODO: Implement subscription update
-        Err(Status::unimplemented("UpdateSubscription not yet implemented"))
+        Err(Status::unimplemented(
+            "UpdateSubscription not yet implemented",
+        ))
     }
 
     /// Lists matching subscriptions.
@@ -245,7 +245,8 @@ impl Subscriber for SubscriberService {
         debug!("ListSubscriptions: project={}", req.project);
 
         // Extract project ID from "projects/{project}" format
-        let project_id = req.project
+        let project_id = req
+            .project
             .strip_prefix("projects/")
             .unwrap_or(&req.project);
 
@@ -286,9 +287,8 @@ impl Subscriber for SubscriberService {
         info!("DeleteSubscription: {}", req.subscription);
 
         // Parse subscription name
-        let resource_name = ResourceName::parse(&req.subscription).map_err(|e| {
-            Status::invalid_argument(format!("Invalid subscription name: {}", e))
-        })?;
+        let resource_name = ResourceName::parse(&req.subscription)
+            .map_err(|e| Status::invalid_argument(format!("Invalid subscription name: {}", e)))?;
 
         let sub_id = format!(
             "{}:{}",
@@ -303,7 +303,9 @@ impl Subscriber for SubscriberService {
         self.backend
             .delete_subscription(&sub_id)
             .await
-            .map_err(|_| Status::not_found(format!("Subscription not found: {}", req.subscription)))?;
+            .map_err(|_| {
+                Status::not_found(format!("Subscription not found: {}", req.subscription))
+            })?;
 
         Ok(Response::new(()))
     }
@@ -314,15 +316,11 @@ impl Subscriber for SubscriberService {
         request: Request<ModifyAckDeadlineRequest>,
     ) -> std::result::Result<Response<()>, Status> {
         let req = request.into_inner();
-        debug!(
-            "ModifyAckDeadline: {} messages",
-            req.ack_ids.len()
-        );
+        debug!("ModifyAckDeadline: {} messages", req.ack_ids.len());
 
         // Parse subscription name
-        let resource_name = ResourceName::parse(&req.subscription).map_err(|e| {
-            Status::invalid_argument(format!("Invalid subscription name: {}", e))
-        })?;
+        let resource_name = ResourceName::parse(&req.subscription)
+            .map_err(|e| Status::invalid_argument(format!("Invalid subscription name: {}", e)))?;
 
         let sub_id = format!(
             "{}:{}",
@@ -331,20 +329,16 @@ impl Subscriber for SubscriberService {
         );
 
         // Verify subscription exists
-        let _ = self
-            .backend
-            .get_subscription(&sub_id)
-            .await
-            .map_err(|_| Status::not_found(format!("Subscription not found: {}", req.subscription)))?;
+        let _ = self.backend.get_subscription(&sub_id).await.map_err(|_| {
+            Status::not_found(format!("Subscription not found: {}", req.subscription))
+        })?;
 
         // Modify visibility for each ack_id (receipt handle)
         for ack_id in &req.ack_ids {
             self.backend
                 .change_visibility(&sub_id, ack_id, req.ack_deadline_seconds as u32)
                 .await
-                .map_err(|e| {
-                    Status::internal(format!("Failed to modify ack deadline: {}", e))
-                })?;
+                .map_err(|e| Status::internal(format!("Failed to modify ack deadline: {}", e)))?;
         }
 
         Ok(Response::new(()))
@@ -360,9 +354,8 @@ impl Subscriber for SubscriberService {
         debug!("Acknowledge: {} messages", req.ack_ids.len());
 
         // Parse subscription name to get topic
-        let resource_name = ResourceName::parse(&req.subscription).map_err(|e| {
-            Status::invalid_argument(format!("Invalid subscription name: {}", e))
-        })?;
+        let resource_name = ResourceName::parse(&req.subscription)
+            .map_err(|e| Status::invalid_argument(format!("Invalid subscription name: {}", e)))?;
 
         let sub_id = format!(
             "{}:{}",
@@ -371,11 +364,9 @@ impl Subscriber for SubscriberService {
         );
 
         // Verify subscription exists
-        let _ = self
-            .backend
-            .get_subscription(&sub_id)
-            .await
-            .map_err(|_| Status::not_found(format!("Subscription not found: {}", req.subscription)))?;
+        let _ = self.backend.get_subscription(&sub_id).await.map_err(|_| {
+            Status::not_found(format!("Subscription not found: {}", req.subscription))
+        })?;
 
         // Delete each message using ack_id (receipt handle)
         for ack_id in &req.ack_ids {
@@ -397,9 +388,8 @@ impl Subscriber for SubscriberService {
         debug!("Pull: max_messages={}", req.max_messages);
 
         // Parse subscription name
-        let resource_name = ResourceName::parse(&req.subscription).map_err(|e| {
-            Status::invalid_argument(format!("Invalid subscription name: {}", e))
-        })?;
+        let resource_name = ResourceName::parse(&req.subscription)
+            .map_err(|e| Status::invalid_argument(format!("Invalid subscription name: {}", e)))?;
 
         let sub_id = format!(
             "{}:{}",
@@ -408,11 +398,9 @@ impl Subscriber for SubscriberService {
         );
 
         // Get subscription config
-        let config = self
-            .backend
-            .get_subscription(&sub_id)
-            .await
-            .map_err(|_| Status::not_found(format!("Subscription not found: {}", req.subscription)))?;
+        let config = self.backend.get_subscription(&sub_id).await.map_err(|_| {
+            Status::not_found(format!("Subscription not found: {}", req.subscription))
+        })?;
 
         // Receive messages from subscription queue (not topic - messages are fanned out to subscriptions)
         let options = ReceiveOptions {
@@ -465,16 +453,13 @@ impl Subscriber for SubscriberService {
             })
             .collect();
 
-        let response = PullResponse {
-            received_messages,
-        };
+        let response = PullResponse { received_messages };
 
         Ok(Response::new(response))
     }
 
     /// Server streaming response type for the StreamingPull method.
-    type StreamingPullStream =
-        ReceiverStream<std::result::Result<StreamingPullResponse, Status>>;
+    type StreamingPullStream = ReceiverStream<std::result::Result<StreamingPullResponse, Status>>;
 
     /// Establishes a stream with the server for receiving messages.
     async fn streaming_pull(
@@ -651,7 +636,9 @@ impl Subscriber for SubscriberService {
         _request: Request<ModifyPushConfigRequest>,
     ) -> std::result::Result<Response<()>, Status> {
         // TODO: Implement push config modification
-        Err(Status::unimplemented("ModifyPushConfig not yet implemented"))
+        Err(Status::unimplemented(
+            "ModifyPushConfig not yet implemented",
+        ))
     }
 
     /// Gets the configuration details of a snapshot.
@@ -791,7 +778,14 @@ mod tests {
         assert!(config.enable_message_ordering);
         assert_eq!(config.filter, Some("attributes.key = 'value'".to_string()));
         assert!(config.dead_letter_policy.is_some());
-        assert_eq!(config.dead_letter_policy.as_ref().unwrap().max_delivery_attempts, 5);
+        assert_eq!(
+            config
+                .dead_letter_policy
+                .as_ref()
+                .unwrap()
+                .max_delivery_attempts,
+            5
+        );
     }
 
     #[test]
@@ -840,10 +834,19 @@ mod tests {
 
         let subscription = SubscriberService::config_to_subscription(&config);
 
-        assert_eq!(subscription.name, "projects/test-project/subscriptions/test-sub");
-        assert_eq!(subscription.topic, "projects/test-project/topics/test-topic");
+        assert_eq!(
+            subscription.name,
+            "projects/test-project/subscriptions/test-sub"
+        );
+        assert_eq!(
+            subscription.topic,
+            "projects/test-project/topics/test-topic"
+        );
         assert_eq!(subscription.ack_deadline_seconds, 20);
-        assert_eq!(subscription.message_retention_duration.unwrap().seconds, 172800);
+        assert_eq!(
+            subscription.message_retention_duration.unwrap().seconds,
+            172800
+        );
         assert!(subscription.enable_message_ordering);
         assert_eq!(subscription.filter, "attributes.env = 'prod'");
         assert!(subscription.dead_letter_policy.is_some());
@@ -886,7 +889,10 @@ mod tests {
         let response = service.create_subscription(request).await.unwrap();
         let created_sub = response.into_inner();
 
-        assert_eq!(created_sub.name, "projects/test-project/subscriptions/my-sub");
+        assert_eq!(
+            created_sub.name,
+            "projects/test-project/subscriptions/my-sub"
+        );
         assert_eq!(created_sub.topic, "projects/test-project/topics/my-topic");
         assert_eq!(created_sub.ack_deadline_seconds, 30);
     }
@@ -1055,7 +1061,10 @@ mod tests {
             topic_message_retention_duration: None,
             state: State::Active as i32,
         };
-        service.create_subscription(Request::new(subscription)).await.unwrap();
+        service
+            .create_subscription(Request::new(subscription))
+            .await
+            .unwrap();
 
         // Get subscription
         let get_request = GetSubscriptionRequest {
@@ -1066,7 +1075,10 @@ mod tests {
         let response = service.get_subscription(request).await.unwrap();
         let retrieved_sub = response.into_inner();
 
-        assert_eq!(retrieved_sub.name, "projects/test-project/subscriptions/get-sub");
+        assert_eq!(
+            retrieved_sub.name,
+            "projects/test-project/subscriptions/get-sub"
+        );
         assert_eq!(retrieved_sub.ack_deadline_seconds, 15);
     }
 
@@ -1173,7 +1185,10 @@ mod tests {
                 topic_message_retention_duration: None,
                 state: State::Active as i32,
             };
-            service.create_subscription(Request::new(subscription)).await.unwrap();
+            service
+                .create_subscription(Request::new(subscription))
+                .await
+                .unwrap();
         }
 
         // List subscriptions
@@ -1219,7 +1234,10 @@ mod tests {
             topic_message_retention_duration: None,
             state: State::Active as i32,
         };
-        service.create_subscription(Request::new(sub_a)).await.unwrap();
+        service
+            .create_subscription(Request::new(sub_a))
+            .await
+            .unwrap();
 
         let sub_b = Subscription {
             name: "projects/project-b/subscriptions/sub-b".to_string(),
@@ -1239,7 +1257,10 @@ mod tests {
             topic_message_retention_duration: None,
             state: State::Active as i32,
         };
-        service.create_subscription(Request::new(sub_b)).await.unwrap();
+        service
+            .create_subscription(Request::new(sub_b))
+            .await
+            .unwrap();
 
         // List subscriptions for project-a only
         let list_request = ListSubscriptionsRequest {
@@ -1287,7 +1308,10 @@ mod tests {
             topic_message_retention_duration: None,
             state: State::Active as i32,
         };
-        service.create_subscription(Request::new(subscription)).await.unwrap();
+        service
+            .create_subscription(Request::new(subscription))
+            .await
+            .unwrap();
 
         // Delete subscription
         let delete_request = DeleteSubscriptionRequest {
@@ -1370,7 +1394,10 @@ mod tests {
             topic_message_retention_duration: None,
             state: State::Active as i32,
         };
-        service.create_subscription(Request::new(subscription)).await.unwrap();
+        service
+            .create_subscription(Request::new(subscription))
+            .await
+            .unwrap();
 
         // Pull messages (should be empty)
         let pull_request = PullRequest {
@@ -1413,22 +1440,26 @@ mod tests {
             topic_message_retention_duration: None,
             state: State::Active as i32,
         };
-        service.create_subscription(Request::new(subscription)).await.unwrap();
+        service
+            .create_subscription(Request::new(subscription))
+            .await
+            .unwrap();
 
         // Publish a message to topic using Publisher service (which fans out to subscriptions)
         let publish_request = PublishRequest {
             topic: "projects/test-project/topics/pull-topic2".to_string(),
-            messages: vec![
-                PubsubMessage {
-                    data: b"Test message".to_vec(),
-                    attributes: Default::default(),
-                    message_id: String::new(),
-                    publish_time: None,
-                    ordering_key: String::new(),
-                },
-            ],
+            messages: vec![PubsubMessage {
+                data: b"Test message".to_vec(),
+                attributes: Default::default(),
+                message_id: String::new(),
+                publish_time: None,
+                ordering_key: String::new(),
+            }],
         };
-        publisher.publish(Request::new(publish_request)).await.unwrap();
+        publisher
+            .publish(Request::new(publish_request))
+            .await
+            .unwrap();
 
         // Pull messages
         let pull_request = PullRequest {
@@ -1495,7 +1526,10 @@ mod tests {
             topic_message_retention_duration: None,
             state: State::Active as i32,
         };
-        service.create_subscription(Request::new(subscription)).await.unwrap();
+        service
+            .create_subscription(Request::new(subscription))
+            .await
+            .unwrap();
 
         // Publish 5 messages to topic using Publisher service (which fans out to subscriptions)
         let mut messages = Vec::new();
@@ -1513,7 +1547,10 @@ mod tests {
             topic: "projects/test-project/topics/max-msg-topic".to_string(),
             messages,
         };
-        publisher.publish(Request::new(publish_request)).await.unwrap();
+        publisher
+            .publish(Request::new(publish_request))
+            .await
+            .unwrap();
 
         // Pull with max_messages=2
         let pull_request = PullRequest {
@@ -1560,22 +1597,26 @@ mod tests {
             topic_message_retention_duration: None,
             state: State::Active as i32,
         };
-        service.create_subscription(Request::new(subscription)).await.unwrap();
+        service
+            .create_subscription(Request::new(subscription))
+            .await
+            .unwrap();
 
         // Publish a message to topic using Publisher service (which fans out to subscriptions)
         let publish_request = PublishRequest {
             topic: "projects/test-project/topics/ack-topic".to_string(),
-            messages: vec![
-                PubsubMessage {
-                    data: b"Ack test".to_vec(),
-                    attributes: Default::default(),
-                    message_id: String::new(),
-                    publish_time: None,
-                    ordering_key: String::new(),
-                },
-            ],
+            messages: vec![PubsubMessage {
+                data: b"Ack test".to_vec(),
+                attributes: Default::default(),
+                message_id: String::new(),
+                publish_time: None,
+                ordering_key: String::new(),
+            }],
         };
-        publisher.publish(Request::new(publish_request)).await.unwrap();
+        publisher
+            .publish(Request::new(publish_request))
+            .await
+            .unwrap();
 
         // Pull message
         let pull_request = PullRequest {
@@ -1655,22 +1696,26 @@ mod tests {
             topic_message_retention_duration: None,
             state: State::Active as i32,
         };
-        service.create_subscription(Request::new(subscription)).await.unwrap();
+        service
+            .create_subscription(Request::new(subscription))
+            .await
+            .unwrap();
 
         // Publish a message to topic using Publisher service (which fans out to subscriptions)
         let publish_request = PublishRequest {
             topic: "projects/test-project/topics/modify-topic".to_string(),
-            messages: vec![
-                PubsubMessage {
-                    data: b"Modify test".to_vec(),
-                    attributes: Default::default(),
-                    message_id: String::new(),
-                    publish_time: None,
-                    ordering_key: String::new(),
-                },
-            ],
+            messages: vec![PubsubMessage {
+                data: b"Modify test".to_vec(),
+                attributes: Default::default(),
+                message_id: String::new(),
+                publish_time: None,
+                ordering_key: String::new(),
+            }],
         };
-        publisher.publish(Request::new(publish_request)).await.unwrap();
+        publisher
+            .publish(Request::new(publish_request))
+            .await
+            .unwrap();
 
         // Pull message
         let pull_request = PullRequest {
@@ -1828,4 +1873,3 @@ mod tests {
         assert_eq!(status.code(), tonic::Code::Unimplemented);
     }
 }
-

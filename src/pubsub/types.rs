@@ -89,10 +89,7 @@ impl ResourceName {
     }
 
     /// Format a subscription resource name.
-    pub fn subscription(
-        project: impl Into<String>,
-        subscription: impl Into<String>,
-    ) -> String {
+    pub fn subscription(project: impl Into<String>, subscription: impl Into<String>) -> String {
         format!(
             "projects/{}/subscriptions/{}",
             project.into(),
@@ -102,11 +99,7 @@ impl ResourceName {
 
     /// Format a snapshot resource name.
     pub fn snapshot(project: impl Into<String>, snapshot: impl Into<String>) -> String {
-        format!(
-            "projects/{}/snapshots/{}",
-            project.into(),
-            snapshot.into()
-        )
+        format!("projects/{}/snapshots/{}", project.into(), snapshot.into())
     }
 }
 
@@ -142,7 +135,9 @@ pub fn validate_topic_id(topic_id: &str) -> Result<()> {
         )));
     }
 
-    let first_char = topic_id.chars().next()
+    let first_char = topic_id
+        .chars()
+        .next()
         .expect("topic_id is guaranteed to be non-empty by length check above");
     if !first_char.is_ascii_alphabetic() {
         return Err(Error::Validation(ValidationError::InvalidTopicId(
@@ -170,31 +165,26 @@ pub fn validate_topic_id(topic_id: &str) -> Result<()> {
 /// - Contain only letters, numbers, hyphens, underscores, periods, tildes, plus, and percent
 pub fn validate_subscription_id(subscription_id: &str) -> Result<()> {
     if subscription_id.len() < 3 || subscription_id.len() > 255 {
-        return Err(Error::Validation(
-            ValidationError::InvalidSubscriptionId(
-                "Subscription ID must be 3-255 characters".to_string(),
-            ),
-        ));
+        return Err(Error::Validation(ValidationError::InvalidSubscriptionId(
+            "Subscription ID must be 3-255 characters".to_string(),
+        )));
     }
 
-    let first_char = subscription_id.chars().next()
+    let first_char = subscription_id
+        .chars()
+        .next()
         .expect("subscription_id is guaranteed to be non-empty by length check above");
     if !first_char.is_ascii_alphabetic() {
-        return Err(Error::Validation(
-            ValidationError::InvalidSubscriptionId(
-                "Subscription ID must start with a letter".to_string(),
-            ),
-        ));
+        return Err(Error::Validation(ValidationError::InvalidSubscriptionId(
+            "Subscription ID must start with a letter".to_string(),
+        )));
     }
 
     for ch in subscription_id.chars() {
         if !matches!(ch, 'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' | '~' | '+' | '%') {
-            return Err(Error::Validation(
-                ValidationError::InvalidSubscriptionId(format!(
-                    "Subscription ID contains invalid character: {}",
-                    ch
-                )),
-            ));
+            return Err(Error::Validation(ValidationError::InvalidSubscriptionId(
+                format!("Subscription ID contains invalid character: {}", ch),
+            )));
         }
     }
 
@@ -215,7 +205,9 @@ pub fn validate_project_id(project_id: &str) -> Result<()> {
         }));
     }
 
-    let first_char = project_id.chars().next()
+    let first_char = project_id
+        .chars()
+        .next()
         .expect("project_id is guaranteed to be non-empty by length check above");
     if !first_char.is_ascii_lowercase() {
         return Err(Error::Validation(ValidationError::InvalidParameter {
@@ -367,14 +359,20 @@ mod tests {
             project: "test-project".to_string(),
             subscription: "test-sub".to_string(),
         };
-        assert_eq!(subscription.to_string(), "projects/test-project/subscriptions/test-sub");
+        assert_eq!(
+            subscription.to_string(),
+            "projects/test-project/subscriptions/test-sub"
+        );
 
         // Test Display trait for Snapshot (lines 125-126)
         let snapshot = ResourceName::Snapshot {
             project: "test-project".to_string(),
             snapshot: "test-snapshot".to_string(),
         };
-        assert_eq!(snapshot.to_string(), "projects/test-project/snapshots/test-snapshot");
+        assert_eq!(
+            snapshot.to_string(),
+            "projects/test-project/snapshots/test-snapshot"
+        );
     }
 
     #[test]
