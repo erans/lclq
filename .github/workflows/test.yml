@@ -109,7 +109,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Run benchmarks
-        run: cargo bench --no-fail-fast -- --output-format bencher | tee benchmark-results.txt
+        run: cargo bench --no-fail-fast | tee benchmark-results.txt
+        env:
+          LCLQ_RECEIPT_SECRET: test-secret-key-for-ci-testing-only
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
