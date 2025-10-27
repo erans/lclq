@@ -652,6 +652,47 @@ impl StorageBackend for InMemoryBackend {
     async fn health_check(&self) -> Result<HealthStatus> {
         Ok(HealthStatus::Healthy)
     }
+
+    /// Process expired visibility timeouts and return messages to available queue.
+    /// This is called by VisibilityManager for active timeout processing.
+    async fn process_expired_visibility(&self, queue_id: &str) -> Result<u64> {
+        let mut queues = self.inner.queues.write().await;
+        let queue = queues
+            .get_mut(queue_id)
+            .ok_or_else(|| Error::QueueNotFound(queue_id.to_string()))?;
+
+        let now = Utc::now();
+        let mut count = 0u64;
+
+        // Find expired in-flight messages
+        let expired_handles: Vec<String> = queue
+            .in_flight_messages
+            .iter()
+            .filter(|(_, m)| m.visibility_expires_at <= now)
+            .map(|(handle, _)| handle.clone())
+            .collect();
+
+        // Return them to available queue
+        for handle in expired_handles {
+            if let Some(in_flight) = queue.in_flight_messages.remove(&handle) {
+                queue.available_messages.push_back(StoredMessage {
+                    message: in_flight.message,
+                    visible_at: now,
+                });
+                count += 1;
+            }
+        }
+
+        if count > 0 {
+            debug!(
+                queue_id = %queue_id,
+                count = count,
+                "Returned expired in-flight messages to available queue"
+            );
+        }
+
+        Ok(count)
+    }
 }
 
 #[cfg(test)]

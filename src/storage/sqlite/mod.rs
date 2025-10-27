@@ -74,10 +74,11 @@ impl SqliteBackend {
     }
 
     /// Process expired visibility timeouts and return messages to available state.
-    pub async fn process_expired_visibility(&self) -> Result<u64> {
+    /// Returns the number of messages that were returned to available state.
+    pub async fn process_expired_visibility(&self, queue_id: &str) -> Result<u64> {
         let now = Utc::now().timestamp_millis();
 
-        // Return messages with expired visibility to available state
+        // Return messages with expired visibility to available state for the specified queue
         let result = sqlx::query(
             r#"
             UPDATE messages
@@ -86,11 +87,13 @@ impl SqliteBackend {
                 receipt_handle = NULL,
                 visibility_expires_at = NULL
             WHERE state = 'in_flight'
+              AND queue_id = ?
               AND visibility_expires_at IS NOT NULL
               AND visibility_expires_at <= ?
             "#,
         )
         .bind(now)
+        .bind(queue_id)
         .bind(now)
         .execute(&self.pool)
         .await
@@ -98,7 +101,8 @@ impl SqliteBackend {
 
         let count = result.rows_affected();
         if count > 0 {
-            info!(
+            debug!(
+                queue_id = %queue_id,
                 messages_returned = count,
                 "Returned expired messages to queue"
             );
@@ -986,5 +990,10 @@ impl StorageBackend for SqliteBackend {
 
     async fn list_subscriptions(&self) -> Result<Vec<crate::types::SubscriptionConfig>> {
         Err(Error::NotImplemented("list_subscriptions".to_string()))
+    }
+
+    async fn process_expired_visibility(&self, queue_id: &str) -> Result<u64> {
+        // Delegate to the existing method
+        self.process_expired_visibility(queue_id).await
     }
 }

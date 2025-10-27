@@ -7,6 +7,7 @@ use tracing::info;
 
 use crate::config::LclqConfig;
 use crate::core::cleanup::CleanupManager;
+use crate::core::visibility::VisibilityManager;
 use crate::pubsub::grpc_server::{GrpcServerConfig, start_grpc_server};
 use crate::pubsub::rest::{RestServerConfig, start_rest_server};
 use crate::server::admin::start_admin_server;
@@ -90,10 +91,26 @@ pub async fn execute(
         });
         info!("Cleanup manager started for SQLite backend");
 
+        // Start visibility manager for SQLite
+        let visibility_manager = Arc::new(VisibilityManager::new(sqlite_backend.clone()));
+        tokio::spawn(async move {
+            visibility_manager.start().await;
+        });
+        info!("Visibility timeout manager started for SQLite backend");
+
         sqlite_backend as Arc<dyn StorageBackend>
     } else {
+        let memory_backend = Arc::new(InMemoryBackend::new());
         info!("In-Memory storage backend initialized");
-        Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>
+
+        // Start visibility manager for in-memory backend
+        let visibility_manager = Arc::new(VisibilityManager::new(memory_backend.clone()));
+        tokio::spawn(async move {
+            visibility_manager.start().await;
+        });
+        info!("Visibility timeout manager started for in-memory backend");
+
+        memory_backend as Arc<dyn StorageBackend>
     };
 
     info!(

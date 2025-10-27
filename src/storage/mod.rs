@@ -86,6 +86,10 @@ pub trait StorageBackend: Send + Sync {
 
     /// Health check.
     async fn health_check(&self) -> Result<HealthStatus>;
+
+    /// Process expired visibility timeouts for a queue.
+    /// Returns the number of messages that were returned to available state.
+    async fn process_expired_visibility(&self, queue_id: &str) -> Result<u64>;
 }
 
 /// Health status.

@@ -40,11 +40,6 @@ impl CleanupManager {
         loop {
             interval.tick().await;
 
-            // Process expired visibility timeouts
-            if let Err(e) = self.backend.process_expired_visibility().await {
-                error!(error = %e, "Error processing expired visibility timeouts");
-            }
-
             // Clean up deduplication cache
             if let Err(e) = self.backend.cleanup_deduplication_cache().await {
                 error!(error = %e, "Error cleaning up deduplication cache");

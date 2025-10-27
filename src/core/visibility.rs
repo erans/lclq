@@ -63,43 +63,17 @@ impl VisibilityManager {
 
     /// Process expired visibility timeouts for a specific queue.
     ///
-    /// ## Current Implementation Status
-    ///
-    /// This is currently a placeholder. The actual visibility timeout handling is integrated
-    /// directly into the storage backends' `receive_messages` method for better performance.
-    ///
-    /// ### Design Decision: Passive vs Active Processing
-    ///
-    /// **Current Approach (Passive):**
-    /// - Expired messages are returned to the available queue during the next `receive_messages` call
-    /// - This happens automatically in `InMemoryBackend::receive_messages` (lines 507-527)
-    /// - Benefits: Simpler, no lock contention, matches cloud provider behavior
-    ///
-    /// **Alternative Approach (Active - not implemented):**
-    /// - Background task actively scans for expired messages every N seconds
-    /// - Would require this VisibilityManager to be started in main.rs
-    /// - Benefits: Messages become available immediately after timeout expires
-    /// - Drawbacks: Additional background task, lock contention, complexity
-    ///
-    /// ### Why Passive is Acceptable
-    ///
-    /// For lclq's use case (local development and CI/CD testing):
-    /// 1. In active dev/test scenarios, queues are constantly polled
-    /// 2. The delay between timeout expiry and next poll is typically negligible
-    /// 3. This matches the eventual consistency model of real cloud providers
-    /// 4. Simpler implementation reduces bugs and maintenance burden
-    ///
-    /// ### Future Enhancement
-    ///
-    /// If active processing becomes necessary (e.g., for long-running services),
-    /// this method would:
-    /// 1. Get all in-flight messages for the queue
-    /// 2. Check which ones have expired visibility
-    /// 3. Move them back to available messages
-    /// 4. Check receive count and move to DLQ if needed
-    ///
+    /// This method calls the backend's `process_expired_visibility` to return
+    /// messages with expired visibility timeouts back to the available queue.
     async fn process_queue_expired_visibility(&self, queue_id: &str) -> crate::Result<()> {
-        debug!(queue_id = %queue_id, "Checking for expired visibility timeouts (placeholder)");
+        let count = self.backend.process_expired_visibility(queue_id).await?;
+        if count > 0 {
+            debug!(
+                queue_id = %queue_id,
+                count = count,
+                "Processed expired visibility timeouts"
+            );
+        }
         Ok(())
     }
 }
