@@ -76,7 +76,7 @@ chmod +x lclq
 
 **Option 2: Docker**
 ```bash
-docker run -p 9324:9324 -p 8085:8085 -p 9000:9000 lclq/lclq:latest
+docker run -p 9324:9324 -p 8085:8085 -p 9000:9000 erans/lclq:latest
 ```
 
 **Option 3: From Source**
@@ -190,7 +190,7 @@ jobs:
 version: '3.8'
 services:
   lclq:
-    image: lclq/lclq:latest
+    image: erans/lclq:latest
     ports:
       - "9324:9324"  # SQS
       - "8085:8085"  # Pub/Sub

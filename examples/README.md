@@ -27,7 +27,7 @@ This directory contains example applications demonstrating how to use lclq with 
 lclq start
 
 # Or using Docker
-docker run -p 9324:9324 -p 8085:8085 -p 9000:9000 lclq/lclq:latest
+docker run -p 9324:9324 -p 8085:8085 -p 9000:9000 erans/lclq:latest
 ```
 
 ### 2. Choose an Example

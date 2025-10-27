@@ -37,11 +37,11 @@ The workflow will automatically:
 1. ✅ Extract version from tag (e.g., `v1.0.0` → `1.0.0`)
 2. ✅ Build Docker image with Alpine Linux
 3. ✅ Tag image with multiple versions:
-   - `lclq/lclq:1.0.0` (full version)
-   - `lclq/lclq:1.0` (major.minor)
-   - `lclq/lclq:1` (major)
-   - `lclq/lclq:latest` (latest)
-4. ✅ Push to Docker Hub (`lclq/lclq:*`)
+   - `erans/lclq:1.0.0` (full version)
+   - `erans/lclq:1.0` (major.minor)
+   - `erans/lclq:1` (major)
+   - `erans/lclq:latest` (latest)
+4. ✅ Push to Docker Hub (`erans/lclq:*`)
 5. ✅ Push to GitHub Container Registry (`ghcr.io/erans/lclq:*`)
 6. ✅ Add OCI labels with metadata (version, git commit, build date)
 7. ✅ Build for multiple platforms: `linux/amd64`, `linux/arm64`
@@ -60,7 +60,7 @@ org.opencontainers.image.licenses: MIT OR Apache-2.0
 
 View metadata:
 ```bash
-docker inspect lclq/lclq:latest | jq '.[0].Config.Labels'
+docker inspect erans/lclq:latest | jq '.[0].Config.Labels'
 ```
 
 ## Testing Locally

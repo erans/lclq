@@ -1924,10 +1924,10 @@ services:
       - "9000:9000"   # Admin
       - "9090:9090"   # Metrics
     volumes:
-      - ./lclq.toml:/etc/lclq/lclq.toml
+      - ./lclq.toml:/etc/erans/lclq.toml
       - lclq-data:/data
     environment:
-      - LCLQ_CONFIG=/etc/lclq/lclq.toml
+      - LCLQ_CONFIG=/etc/erans/lclq.toml
       - RUST_LOG=info
 
 volumes:

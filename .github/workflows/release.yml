@@ -72,8 +72,8 @@ jobs:
 
             **Docker Hub:**
             ```bash
-            docker pull lclq/lclq:${{ needs.get-version.outputs.version }}
-            docker run -p 9324:9324 -p 8085:8085 -p 8086:8086 -p 9000:9000 -p 9090:9090 lclq/lclq:${{ needs.get-version.outputs.version }}
+            docker pull erans/lclq:${{ needs.get-version.outputs.version }}
+            docker run -p 9324:9324 -p 8085:8085 -p 8086:8086 -p 9000:9000 -p 9090:9090 erans/lclq:${{ needs.get-version.outputs.version }}
             ```
 
             **GitHub Container Registry:**

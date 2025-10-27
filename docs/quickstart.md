@@ -47,7 +47,7 @@ Invoke-WebRequest -Uri https://github.com/yourusername/lclq/releases/latest/down
 ### Option 2: Docker
 
 ```bash
-docker pull lclq/lclq:latest
+docker pull erans/lclq:latest
 ```
 
 ### Option 3: From Source
@@ -74,12 +74,12 @@ This starts all services with default settings:
 
 ```bash
 # In-memory storage (fast, not persistent)
-docker run -p 9324:9324 -p 8085:8085 -p 9000:9000 lclq/lclq:latest
+docker run -p 9324:9324 -p 8085:8085 -p 9000:9000 erans/lclq:latest
 
 # SQLite storage (persistent)
 docker run -p 9324:9324 -p 8085:8085 -p 9000:9000 \
   -v $(pwd)/data:/data \
-  lclq/lclq:latest --storage-type sqlite --sqlite-path /data/lclq.db
+  erans/lclq:latest --storage-type sqlite --sqlite-path /data/lclq.db
 ```
 
 ### Verify Server is Running
@@ -1031,7 +1031,7 @@ sqs.receive_message(MaxNumberOfMessages=10)  # Receive up to 10
 
 ```bash
 # Make sure ports are exposed
-docker run -p 9324:9324 -p 8085:8085 lclq/lclq:latest
+docker run -p 9324:9324 -p 8085:8085 erans/lclq:latest
 ```
 
 **Cannot connect from another container**:
@@ -1040,7 +1040,7 @@ docker run -p 9324:9324 -p 8085:8085 lclq/lclq:latest
 # Use Docker Compose networking
 services:
   lclq:
-    image: lclq/lclq:latest
+    image: erans/lclq:latest
   app:
     environment:
       - AWS_ENDPOINT_URL=http://lclq:9324  # Use service name
