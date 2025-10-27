@@ -4,7 +4,7 @@
   "description": "Integration tests for lclq using AWS SDK for JavaScript v3",
   "type": "module",
   "scripts": {
-    "test": "node test-sqs.js",
+    "test": "node test-sqs-advanced.js",
     "test:advanced": "node test-sqs-advanced.js"
   },
   "keywords": ["lclq", "sqs", "integration-test"],
