@@ -56,9 +56,13 @@ jobs:
 
       - name: Run tests
         run: cargo test --verbose
+        env:
+          LCLQ_RECEIPT_SECRET: test-secret-key-for-ci-testing-only
 
       - name: Run SQLite backend tests
         run: cargo test --test sqlite_backend_test --verbose
+        env:
+          LCLQ_RECEIPT_SECRET: test-secret-key-for-ci-testing-only
 
   # Build Docker image
   docker:
@@ -82,8 +86,10 @@ jobs:
 
       - name: Test Docker image
         run: |
-          docker run -d --name lclq-test -p 9324:9324 -p 9000:9000 \
-            -e LCLQ_BIND_ADDRESS=0.0.0.0 lclq:ci
+          docker run -d --name lclq-test -p 9324:9324 -p 9000:9000 -p 9090:9090 \
+            -e LCLQ_BIND_ADDRESS=0.0.0.0 \
+            -e LCLQ_RECEIPT_SECRET=test-secret-key-for-ci-testing-only \
+            lclq:ci
           sleep 5
           curl -f http://localhost:9000/health || exit 1
           curl -f http://localhost:9090/metrics || exit 1
@@ -142,6 +148,7 @@ jobs:
           sleep 3
         env:
           RUST_LOG: info
+          LCLQ_RECEIPT_SECRET: test-secret-key-for-ci-testing-only
 
       - name: Install Python dependencies
         working-directory: tests/integration/python
@@ -177,6 +184,7 @@ jobs:
           sleep 3
         env:
           RUST_LOG: info
+          LCLQ_RECEIPT_SECRET: test-secret-key-for-ci-testing-only
 
       - name: Install Node dependencies
         working-directory: tests/integration/javascript
@@ -212,6 +220,7 @@ jobs:
           sleep 3
         env:
           RUST_LOG: info
+          LCLQ_RECEIPT_SECRET: test-secret-key-for-ci-testing-only
 
       - name: Install Go dependencies
         working-directory: tests/integration/go
