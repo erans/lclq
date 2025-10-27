@@ -8,7 +8,11 @@ use clap::{Parser, Subcommand};
 
 /// Build a detailed version string with git commit and build information
 fn long_version() -> String {
-    let dirty_suffix = if env!("GIT_DIRTY") == "dirty" { "-dirty" } else { "" };
+    let dirty_suffix = if env!("GIT_DIRTY") == "dirty" {
+        "-dirty"
+    } else {
+        ""
+    };
     format!(
         "{} ({}{})\nBuilt: {} [{}]",
         env!("CARGO_PKG_VERSION"),

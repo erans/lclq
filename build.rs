@@ -57,7 +57,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Set environment variables for use in the binary
     println!("cargo:rustc-env=GIT_HASH={}", git_hash);
-    println!("cargo:rustc-env=GIT_DIRTY={}", if git_dirty { "dirty" } else { "clean" });
+    println!(
+        "cargo:rustc-env=GIT_DIRTY={}",
+        if git_dirty { "dirty" } else { "clean" }
+    );
     println!("cargo:rustc-env=BUILD_TIMESTAMP={}", build_timestamp);
     println!("cargo:rustc-env=BUILD_PROFILE={}", profile);
 
