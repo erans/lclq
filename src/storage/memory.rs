@@ -461,6 +461,9 @@ impl StorageBackend for InMemoryBackend {
             }
         }
 
+        // Collect messages to move to DLQ
+        let mut dlq_moves: Vec<(String, Message)> = Vec::new();
+
         // Remove visible messages from queue and mark as in-flight
         // Note: We iterate in reverse to avoid index invalidation when removing,
         // but this causes messages to be added in reverse order, so we reverse at the end
@@ -471,20 +474,17 @@ impl StorageBackend for InMemoryBackend {
 
                 // Check if message should go to DLQ
                 let should_dlq = if let Some(dlq_config) = &queue.config.dlq_config {
-                    message.receive_count >= dlq_config.max_receive_count
+                    message.receive_count > dlq_config.max_receive_count
                 } else {
                     false
                 };
 
                 if should_dlq {
-                    // Move to DLQ (for now just log, full DLQ support coming later)
-                    warn!(
-                        queue_id = %queue_id,
-                        message_id = %message.id,
-                        receive_count = message.receive_count,
-                        "Message exceeded max receive count, should move to DLQ"
-                    );
-                    continue; // Don't return the message
+                    // Collect message for DLQ movement
+                    if let Some(dlq_config) = &queue.config.dlq_config {
+                        dlq_moves.push((dlq_config.target_queue_id.clone(), message));
+                    }
+                    continue; // Don't return the message to the client
                 }
 
                 let receipt_handle = generate_receipt_handle(queue_id, &message.id);
@@ -502,6 +502,37 @@ impl StorageBackend for InMemoryBackend {
                     message,
                     receipt_handle,
                 });
+            }
+        }
+
+        // Move collected messages to their DLQ queues
+        for (dlq_queue_id, message) in dlq_moves {
+            // Create a fresh message for the DLQ with reset metadata
+            let mut dlq_message = message.clone();
+            dlq_message.sent_timestamp = Utc::now();
+            dlq_message.receive_count = 0;
+            dlq_message.queue_id = dlq_queue_id.clone();
+
+            if let Some(dlq_queue) = queues.get_mut(&dlq_queue_id) {
+                dlq_queue.available_messages.push_back(StoredMessage {
+                    message: dlq_message,
+                    visible_at: now,
+                });
+
+                info!(
+                    source_queue_id = %queue_id,
+                    dlq_queue_id = %dlq_queue_id,
+                    message_id = %message.id,
+                    original_receive_count = message.receive_count,
+                    "Message moved to DLQ"
+                );
+            } else {
+                warn!(
+                    source_queue_id = %queue_id,
+                    dlq_queue_id = %dlq_queue_id,
+                    message_id = %message.id,
+                    "DLQ queue not found, message dropped"
+                );
             }
         }
 

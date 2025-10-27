@@ -24,7 +24,6 @@ sqs = boto3.client(
 )
 
 
-@pytest.mark.skip(reason="DLQ message movement not yet implemented - messages that exceed max receive count are dropped instead of moved to DLQ")
 def test_dead_letter_queue():
     """Test Dead Letter Queue functionality."""
     print("\n🧪 Test: Dead Letter Queue")

@@ -734,6 +734,45 @@ impl StorageBackend for SqliteBackend {
                 let mut message = self.parse_message_row(&row)?;
                 message.receive_count += 1;
 
+                // Check if message should move to DLQ
+                let should_dlq = if let Some(dlq_config) = &queue.dlq_config {
+                    message.receive_count > dlq_config.max_receive_count
+                } else {
+                    false
+                };
+
+                if should_dlq {
+                    // Move message to DLQ
+                    if let Some(dlq_config) = &queue.dlq_config {
+                        let dlq_queue_id = &dlq_config.target_queue_id;
+
+                        // Create fresh message for DLQ
+                        let mut dlq_message = message.clone();
+                        dlq_message.sent_timestamp = Utc::now();
+                        dlq_message.receive_count = 0;
+                        dlq_message.queue_id = dlq_queue_id.clone();
+
+                        // Insert into DLQ
+                        self.send_message_impl(&mut *tx, dlq_queue_id, dlq_message).await?;
+
+                        // Delete from source queue
+                        sqlx::query("DELETE FROM messages WHERE id = ?")
+                            .bind(&message_id)
+                            .execute(&mut *tx)
+                            .await
+                            .map_err(|e| Error::StorageError(format!("Failed to delete message: {}", e)))?;
+
+                        info!(
+                            source_queue_id = %queue_id,
+                            dlq_queue_id = %dlq_queue_id,
+                            message_id = %message.id,
+                            original_receive_count = message.receive_count,
+                            "Message moved to DLQ"
+                        );
+                    }
+                    continue; // Don't add to received list
+                }
+
                 // Generate receipt handle
                 let receipt_handle =
                     generate_receipt_handle(queue_id, &MessageId(message_id.clone()));
@@ -773,6 +812,45 @@ impl StorageBackend for SqliteBackend {
                 let message_id: String = row.get("id");
                 let mut message = self.parse_message_row(&row)?;
                 message.receive_count += 1;
+
+                // Check if message should move to DLQ
+                let should_dlq = if let Some(dlq_config) = &queue.dlq_config {
+                    message.receive_count > dlq_config.max_receive_count
+                } else {
+                    false
+                };
+
+                if should_dlq {
+                    // Move message to DLQ
+                    if let Some(dlq_config) = &queue.dlq_config {
+                        let dlq_queue_id = &dlq_config.target_queue_id;
+
+                        // Create fresh message for DLQ
+                        let mut dlq_message = message.clone();
+                        dlq_message.sent_timestamp = Utc::now();
+                        dlq_message.receive_count = 0;
+                        dlq_message.queue_id = dlq_queue_id.clone();
+
+                        // Insert into DLQ
+                        self.send_message_impl(&mut *tx, dlq_queue_id, dlq_message).await?;
+
+                        // Delete from source queue
+                        sqlx::query("DELETE FROM messages WHERE id = ?")
+                            .bind(&message_id)
+                            .execute(&mut *tx)
+                            .await
+                            .map_err(|e| Error::StorageError(format!("Failed to delete message: {}", e)))?;
+
+                        info!(
+                            source_queue_id = %queue_id,
+                            dlq_queue_id = %dlq_queue_id,
+                            message_id = %message.id,
+                            original_receive_count = message.receive_count,
+                            "Message moved to DLQ"
+                        );
+                    }
+                    continue; // Don't add to received list
+                }
 
                 let receipt_handle =
                     generate_receipt_handle(queue_id, &MessageId(message_id.clone()));
