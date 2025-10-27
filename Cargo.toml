@@ -76,6 +76,10 @@ reqwest = { version = "0.12", features = ["json"] }
 prometheus = "0.13"
 
 # Graceful shutdown
+signal-hook = { version = "0.3", optional = true }
+signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"], optional = true }
+
+[target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 
