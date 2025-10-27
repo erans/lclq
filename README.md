@@ -5,11 +5,11 @@ Perfect for lightning-fast local development and CI/CD testing without cloud dep
 
 ## Why lclq?
 
-**Speed**: 182x faster than actual cloud services - over 1.8M messages/sec with sub-10µs latency
-**Zero Config**: Start instantly with `lclq start` - no accounts, no credentials, no setup
-**SDK Compatible**: Works with official AWS and GCP SDKs out of the box
-**CI/CD Ready**: Spin up in seconds for integration tests without cloud costs or rate limits
-**Lightweight**: Single ~17MB binary with in-memory or SQLite storage
+* **Speed**: 182x faster than actual cloud services - over 1.8M messages/sec with sub-10µs latency
+* **Zero Config**: Start instantly with `lclq start` - no accounts, no credentials, no setup
+* **SDK Compatible**: Works with official AWS and GCP SDKs out of the box
+* **CI/CD Ready**: Spin up in seconds for integration tests without cloud costs or rate limits
+* **Lightweight**: Single ~17MB binary with in-memory or SQLite storage
 
 ### Perfect For
 
