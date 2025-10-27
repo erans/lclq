@@ -753,14 +753,17 @@ impl StorageBackend for SqliteBackend {
                         dlq_message.queue_id = dlq_queue_id.clone();
 
                         // Insert into DLQ
-                        self.send_message_impl(&mut *tx, dlq_queue_id, dlq_message).await?;
+                        self.send_message_impl(&mut *tx, dlq_queue_id, dlq_message)
+                            .await?;
 
                         // Delete from source queue
                         sqlx::query("DELETE FROM messages WHERE id = ?")
                             .bind(&message_id)
                             .execute(&mut *tx)
                             .await
-                            .map_err(|e| Error::StorageError(format!("Failed to delete message: {}", e)))?;
+                            .map_err(|e| {
+                                Error::StorageError(format!("Failed to delete message: {}", e))
+                            })?;
 
                         info!(
                             source_queue_id = %queue_id,
@@ -832,14 +835,17 @@ impl StorageBackend for SqliteBackend {
                         dlq_message.queue_id = dlq_queue_id.clone();
 
                         // Insert into DLQ
-                        self.send_message_impl(&mut *tx, dlq_queue_id, dlq_message).await?;
+                        self.send_message_impl(&mut *tx, dlq_queue_id, dlq_message)
+                            .await?;
 
                         // Delete from source queue
                         sqlx::query("DELETE FROM messages WHERE id = ?")
                             .bind(&message_id)
                             .execute(&mut *tx)
                             .await
-                            .map_err(|e| Error::StorageError(format!("Failed to delete message: {}", e)))?;
+                            .map_err(|e| {
+                                Error::StorageError(format!("Failed to delete message: {}", e))
+                            })?;
 
                         info!(
                             source_queue_id = %queue_id,
