@@ -950,8 +950,7 @@ impl StorageBackend for SqliteBackend {
             available_messages: available as u64,
             in_flight_messages: in_flight as u64,
             dlq_messages: 0, // TODO: Track DLQ messages
-            oldest_message_timestamp: oldest_timestamp
-                .and_then(DateTime::from_timestamp_millis),
+            oldest_message_timestamp: oldest_timestamp.and_then(DateTime::from_timestamp_millis),
         })
     }
 
