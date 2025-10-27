@@ -6,10 +6,23 @@ pub mod output;
 
 use clap::{Parser, Subcommand};
 
+/// Build a detailed version string with git commit and build information
+fn long_version() -> String {
+    let dirty_suffix = if env!("GIT_DIRTY") == "dirty" { "-dirty" } else { "" };
+    format!(
+        "{} ({}{})\nBuilt: {} [{}]",
+        env!("CARGO_PKG_VERSION"),
+        env!("GIT_HASH"),
+        dirty_suffix,
+        env!("BUILD_TIMESTAMP"),
+        env!("BUILD_PROFILE")
+    )
+}
+
 /// Command-line interface for lclq
 #[derive(Parser)]
 #[command(name = "lclq")]
-#[command(author, version, about = "Local Cloud Queue - AWS SQS & GCP Pub/Sub compatible queue service", long_about = None)]
+#[command(author, version = env!("CARGO_PKG_VERSION"), about = "Local Cloud Queue - AWS SQS & GCP Pub/Sub compatible queue service", long_about = None)]
 pub struct Cli {
     /// The command to execute
     #[command(subcommand)]
@@ -140,8 +153,15 @@ pub enum QueueCommands {
 }
 
 impl Cli {
-    /// Parse command-line arguments
+    /// Parse command-line arguments with enhanced version info
     pub fn parse_args() -> Self {
+        // Check if --version or -V was passed
+        let args: Vec<String> = std::env::args().collect();
+        if args.len() == 2 && (args[1] == "--version" || args[1] == "-V") {
+            println!("{}", long_version());
+            std::process::exit(0);
+        }
+
         Self::parse()
     }
 }

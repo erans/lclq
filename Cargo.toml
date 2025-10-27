@@ -86,6 +86,7 @@ prost-types = "0.13"
 
 [build-dependencies]
 tonic-build = "0.12"
+chrono = "0.4"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
