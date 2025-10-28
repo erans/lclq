@@ -68,16 +68,9 @@ jobs:
 
             ## Docker
 
-            **Docker Hub:**
             ```bash
             docker pull erans/lclq:${{ needs.get-version.outputs.version }}
             docker run -p 9324:9324 -p 8085:8085 -p 8086:8086 -p 9000:9000 -p 9090:9090 erans/lclq:${{ needs.get-version.outputs.version }}
-            ```
-
-            **GitHub Container Registry:**
-            ```bash
-            docker pull ghcr.io/${{ github.repository }}:${{ needs.get-version.outputs.version }}
-            docker run -p 9324:9324 -p 8085:8085 -p 8086:8086 -p 9000:9000 -p 9090:9090 ghcr.io/${{ github.repository }}:${{ needs.get-version.outputs.version }}
             ```
 
             ## What's Changed
@@ -194,13 +187,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Extract metadata for Docker Hub
         id: meta-dockerhub
         uses: docker/metadata-action@v5
@@ -212,25 +198,12 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest
 
-      - name: Extract metadata for GHCR
-        id: meta-ghcr
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: |
-            ${{ steps.meta-dockerhub.outputs.tags }}
-            ${{ steps.meta-ghcr.outputs.tags }}
+          tags: ${{ steps.meta-dockerhub.outputs.tags }}
           labels: ${{ steps.meta-dockerhub.outputs.labels }}
           build-args: |
             VERSION=${{ needs.get-version.outputs.version }}
