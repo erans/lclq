@@ -426,6 +426,7 @@ See [docs/TODO.md](docs/TODO.md) for detailed roadmap.
 
 - **[Quick Start Guide](docs/quickstart.md)** - Get started in 5 minutes
 - **[Benchmarks](docs/benchmarks.md)** - Performance analysis
+- **[Changelog](CHANGELOG.md)** - Release history and version changes
 - **[Product Roadmap](docs/prd.md)** - Feature planning
 - **[Technical Roadmap](docs/tech-prd.md)** - Implementation details
 
