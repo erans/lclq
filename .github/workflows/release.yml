@@ -82,6 +82,8 @@ jobs:
     needs: [get-version, create-release]
     if: always() && needs.get-version.result == 'success'
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -127,7 +129,14 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo dpkg --add-architecture arm64
+          # Mark all existing sources as amd64-only
           sudo sed -i 's/deb http/deb [arch=amd64] http/g' /etc/apt/sources.list
+          sudo sed -i 's/deb mirror/deb [arch=amd64] mirror/g' /etc/apt/sources.list
+          # Handle Ubuntu 24.04+ DEB822 format
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i 's/^Types:/Architectures: amd64\nTypes:/' /etc/apt/sources.list.d/ubuntu.sources
+          fi
+          # Add ARM64 sources from ports.ubuntu.com
           echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64.list
           echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
           echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
@@ -148,27 +157,33 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../${{ matrix.name }}.tar.gz lclq
+          PLATFORM=$(echo "${{ matrix.name }}" | sed 's/^lclq-//')
+          tar czf ../../../lclq-v${{ needs.get-version.outputs.version }}-${PLATFORM}.tar.gz lclq
           cd -
 
       - name: Create archive (Windows)
         if: matrix.os == 'windows-latest'
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../${{ matrix.name }}.zip lclq.exe
+          $platform = "${{ matrix.name }}".Replace("lclq-", "")
+          7z a "../../../lclq-v${{ needs.get-version.outputs.version }}-${platform}.zip" lclq.exe
           cd -
 
       - name: Upload release asset (Linux/macOS)
         if: matrix.os != 'windows-latest' && needs.create-release.result == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload v${{ needs.get-version.outputs.version }} ${{ matrix.name }}.tar.gz --clobber
+        run: |
+          PLATFORM=$(echo "${{ matrix.name }}" | sed 's/^lclq-//')
+          gh release upload v${{ needs.get-version.outputs.version }} lclq-v${{ needs.get-version.outputs.version }}-${PLATFORM}.tar.gz --clobber
 
       - name: Upload release asset (Windows)
         if: matrix.os == 'windows-latest' && needs.create-release.result == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload v${{ needs.get-version.outputs.version }} ${{ matrix.name }}.zip --clobber
+        run: |
+          $platform = "${{ matrix.name }}".Replace("lclq-", "")
+          gh release upload v${{ needs.get-version.outputs.version }} "lclq-v${{ needs.get-version.outputs.version }}-${platform}.zip" --clobber
 
   publish-docker:
     name: Publish Docker Image
