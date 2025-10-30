@@ -73,7 +73,7 @@ colored = "2.1"
 reqwest = { version = "0.12", features = ["json"] }
 
 # Metrics
-prometheus = "0.13"
+prometheus = "0.14"
 
 # Graceful shutdown
 signal-hook = { version = "0.3", optional = true }
