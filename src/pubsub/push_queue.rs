@@ -1,6 +1,6 @@
 //! Push delivery queue with priority scheduling.
 
-use crate::types::{Message, PushConfig, RetryPolicy, SubscriptionConfig};
+use crate::types::{Message, SubscriptionConfig};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::sync::Arc;
@@ -135,7 +135,7 @@ impl Default for DeliveryQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::MessageId;
+    use crate::types::{MessageId, PushConfig, RetryPolicy};
     use chrono::Utc;
     use std::collections::HashMap;
 
