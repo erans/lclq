@@ -85,7 +85,6 @@ fn spawn_worker(
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let client = Client::builder()
-            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECONDS as u64))
             .build()
             .expect("Failed to create HTTP client");
 
