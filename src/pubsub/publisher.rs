@@ -24,7 +24,7 @@ use chrono::Utc;
 use std::sync::Arc;
 use std::time::Instant;
 use tonic::{Request, Response, Status};
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 /// Publisher service implementation.
 pub struct PublisherService {
@@ -288,16 +288,15 @@ impl Publisher for PublisherService {
                     published.iter().map(|m| &m.id.0).collect::<Vec<_>>()
                 );
 
-                // Enqueue push subscriptions for each published message
-                for msg in &published {
-                    self.enqueue_push_subscriptions(&topic_id, msg).await;
-                }
-
                 // Use message IDs from first subscription
                 if message_ids.is_empty() {
                     message_ids = published.iter().map(|m| m.id.0.clone()).collect();
                 }
             }
+
+            // Enqueue push subscriptions once for all messages and subscriptions
+            self.enqueue_push_subscriptions(&topic_subscriptions, &messages)
+                .await;
         }
 
         // Build response with message IDs
@@ -466,27 +465,25 @@ impl Publisher for PublisherService {
 }
 
 impl PublisherService {
-    /// Enqueue push subscriptions for a published message.
-    async fn enqueue_push_subscriptions(&self, topic_id: &str, message: &Message) {
+    /// Enqueue push subscriptions for published messages.
+    async fn enqueue_push_subscriptions(
+        &self,
+        subscriptions: &[crate::types::SubscriptionConfig],
+        messages: &[Message],
+    ) {
         if let Some(ref queue) = self.delivery_queue {
-            // Get all subscriptions for this topic
-            match self.backend.list_subscriptions().await {
-                Ok(subscriptions) => {
-                    for sub in subscriptions {
-                        // Check if subscription is for this topic and has push config
-                        if sub.topic_id == topic_id && sub.push_config.is_some() {
-                            let task = DeliveryTask {
-                                message: message.clone(),
-                                subscription: Arc::new(sub),
-                                attempt: 0,
-                                scheduled_time: Instant::now(),
-                            };
-                            queue.enqueue(task).await;
-                        }
+            // Enqueue tasks for each push subscription and message combination
+            for sub in subscriptions {
+                if sub.push_config.is_some() {
+                    for message in messages {
+                        let task = DeliveryTask {
+                            message: message.clone(),
+                            subscription: Arc::new(sub.clone()),
+                            attempt: 0,
+                            scheduled_time: Instant::now(),
+                        };
+                        queue.enqueue(task).await;
                     }
-                }
-                Err(e) => {
-                    error!("Failed to get subscriptions for push delivery: {}", e);
                 }
             }
         }
