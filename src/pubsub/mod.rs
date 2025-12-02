@@ -22,6 +22,7 @@ pub mod proto {
 pub mod grpc_server;
 pub mod publisher;
 pub mod push_queue;
+pub mod push_worker;
 pub mod rest;
 pub mod subscriber;
 pub mod types;
