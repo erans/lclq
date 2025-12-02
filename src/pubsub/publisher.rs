@@ -13,6 +13,7 @@
 use crate::error::{Error, Result};
 use crate::pubsub::proto::publisher_server::Publisher;
 use crate::pubsub::proto::*;
+use crate::pubsub::push_queue::{DeliveryQueue, DeliveryTask};
 use crate::pubsub::types::{ResourceName, validate_topic_id};
 use crate::storage::StorageBackend;
 use crate::types::{
@@ -21,18 +22,23 @@ use crate::types::{
 use base64::Engine;
 use chrono::Utc;
 use std::sync::Arc;
+use std::time::Instant;
 use tonic::{Request, Response, Status};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 /// Publisher service implementation.
 pub struct PublisherService {
     backend: Arc<dyn StorageBackend>,
+    delivery_queue: Option<DeliveryQueue>,
 }
 
 impl PublisherService {
     /// Create a new Publisher service.
-    pub fn new(backend: Arc<dyn StorageBackend>) -> Self {
-        Self { backend }
+    pub fn new(backend: Arc<dyn StorageBackend>, delivery_queue: Option<DeliveryQueue>) -> Self {
+        Self {
+            backend,
+            delivery_queue,
+        }
     }
 
     /// Convert proto Topic to our internal QueueConfig.
@@ -282,6 +288,11 @@ impl Publisher for PublisherService {
                     published.iter().map(|m| &m.id.0).collect::<Vec<_>>()
                 );
 
+                // Enqueue push subscriptions for each published message
+                for msg in &published {
+                    self.enqueue_push_subscriptions(&topic_id, msg).await;
+                }
+
                 // Use message IDs from first subscription
                 if message_ids.is_empty() {
                     message_ids = published.iter().map(|m| m.id.0.clone()).collect();
@@ -454,6 +465,34 @@ impl Publisher for PublisherService {
     }
 }
 
+impl PublisherService {
+    /// Enqueue push subscriptions for a published message.
+    async fn enqueue_push_subscriptions(&self, topic_id: &str, message: &Message) {
+        if let Some(ref queue) = self.delivery_queue {
+            // Get all subscriptions for this topic
+            match self.backend.list_subscriptions().await {
+                Ok(subscriptions) => {
+                    for sub in subscriptions {
+                        // Check if subscription is for this topic and has push config
+                        if sub.topic_id == topic_id && sub.push_config.is_some() {
+                            let task = DeliveryTask {
+                                message: message.clone(),
+                                subscription: Arc::new(sub),
+                                attempt: 0,
+                                scheduled_time: Instant::now(),
+                            };
+                            queue.enqueue(task).await;
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to get subscriptions for push delivery: {}", e);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -464,7 +503,7 @@ mod tests {
     /// Create a test publisher service with in-memory backend.
     fn create_test_service() -> PublisherService {
         let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
-        PublisherService::new(backend)
+        PublisherService::new(backend, None)
     }
 
     // ========================================================================
@@ -1311,5 +1350,83 @@ mod tests {
         assert!(result.is_err());
         let status = result.unwrap_err();
         assert_eq!(status.code(), tonic::Code::Unimplemented);
+    }
+
+    #[tokio::test]
+    async fn test_publish_enqueues_push_subscriptions() {
+        use crate::pubsub::push_queue::DeliveryQueue;
+        use crate::types::{PushConfig, RetryPolicy};
+        use std::time::Instant;
+
+        let backend = Arc::new(InMemoryBackend::new());
+        let delivery_queue = DeliveryQueue::new();
+        let service = PublisherService::new(backend.clone(), Some(delivery_queue.clone()));
+
+        // Create topic
+        let topic = Topic {
+            name: "projects/test/topics/test-topic".to_string(),
+            labels: std::collections::HashMap::new(),
+            message_storage_policy: None,
+            kms_key_name: String::new(),
+            schema_settings: None,
+            satisfies_pzs: false,
+            message_retention_duration: None,
+        };
+        service.create_topic(Request::new(topic)).await.unwrap();
+
+        // Create backing queue for subscription (subscriptions have their own message storage)
+        let sub_queue_config = QueueConfig {
+            id: "test:test-sub".to_string(),
+            name: "projects/test/subscriptions/test-sub".to_string(),
+            queue_type: QueueType::PubSubTopic,
+            visibility_timeout: 60,
+            message_retention_period: 604800,
+            max_message_size: 10 * 1024 * 1024,
+            delay_seconds: 0,
+            dlq_config: None,
+            content_based_deduplication: false,
+            tags: Default::default(),
+            redrive_allow_policy: None,
+        };
+        backend.create_queue(sub_queue_config).await.unwrap();
+
+        // Create push subscription
+        let subscription = crate::types::SubscriptionConfig {
+            id: "test:test-sub".to_string(),
+            name: "projects/test/subscriptions/test-sub".to_string(),
+            topic_id: "test:test-topic".to_string(),
+            ack_deadline_seconds: 30,
+            message_retention_duration: 604800,
+            enable_message_ordering: false,
+            filter: None,
+            dead_letter_policy: None,
+            push_config: Some(PushConfig {
+                endpoint: "https://example.com/webhook".to_string(),
+                retry_policy: Some(RetryPolicy::default()),
+                timeout_seconds: Some(30),
+            }),
+        };
+        backend.create_subscription(subscription).await.unwrap();
+
+        // Publish message
+        let publish_req = PublishRequest {
+            topic: "projects/test/topics/test-topic".to_string(),
+            messages: vec![PubsubMessage {
+                data: b"test message".to_vec(),
+                attributes: std::collections::HashMap::new(),
+                message_id: String::new(),
+                publish_time: None,
+                ordering_key: String::new(),
+            }],
+        };
+
+        service.publish(Request::new(publish_req)).await.unwrap();
+
+        // Verify task was enqueued
+        assert_eq!(delivery_queue.len().await, 1);
+
+        let task = delivery_queue.dequeue_ready().await.unwrap();
+        assert_eq!(task.attempt, 0);
+        assert!(task.scheduled_time <= Instant::now());
     }
 }

@@ -714,7 +714,7 @@ mod tests {
 
     /// Create a test publisher service (for creating topics).
     fn create_test_publisher(backend: Arc<dyn StorageBackend>) -> PublisherService {
-        PublisherService::new(backend)
+        PublisherService::new(backend, None)
     }
 
     /// Helper to create a test topic.

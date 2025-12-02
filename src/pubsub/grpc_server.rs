@@ -44,7 +44,7 @@ pub async fn start_grpc_server(
     info!("Starting Pub/Sub gRPC server on {}", addr);
 
     // Create service instances
-    let publisher = PublisherService::new(backend.clone());
+    let publisher = PublisherService::new(backend.clone(), None);
     let subscriber = SubscriberService::new(backend);
 
     // Build the gRPC server
@@ -173,7 +173,7 @@ mod tests {
         let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
 
         // Test that services can be created
-        let publisher = PublisherService::new(backend.clone());
+        let publisher = PublisherService::new(backend.clone(), None);
         let subscriber = SubscriberService::new(backend);
 
         // Services should be created successfully (no panics)
