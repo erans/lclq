@@ -137,6 +137,7 @@ impl RestState {
                     max_delivery_attempts: dlp.max_delivery_attempts.unwrap_or(5) as u32,
                 }
             }),
+            push_config: None,
         })
     }
 
@@ -2291,6 +2292,7 @@ mod tests {
             enable_message_ordering: false,
             filter: None,
             dead_letter_policy: None,
+            push_config: None,
         };
 
         let converted = RestState::config_to_subscription(&config);

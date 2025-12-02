@@ -202,6 +202,8 @@ pub struct SubscriptionConfig {
     pub filter: Option<String>,
     /// Dead letter policy.
     pub dead_letter_policy: Option<DeadLetterPolicy>,
+    /// Push configuration (None = pull subscription).
+    pub push_config: Option<PushConfig>,
 }
 
 /// Dead letter policy for Pub/Sub.
@@ -211,6 +213,38 @@ pub struct DeadLetterPolicy {
     pub dead_letter_topic: String,
     /// Max delivery attempts.
     pub max_delivery_attempts: u32,
+}
+
+/// Push configuration for push subscriptions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushConfig {
+    /// Push endpoint URL (HTTP or HTTPS).
+    pub endpoint: String,
+    /// Retry policy for failed deliveries.
+    pub retry_policy: Option<RetryPolicy>,
+    /// HTTP request timeout in seconds.
+    pub timeout_seconds: Option<u32>,
+}
+
+/// Retry policy for push deliveries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryPolicy {
+    /// Minimum backoff delay in seconds (default: 10).
+    pub min_backoff_seconds: u32,
+    /// Maximum backoff delay in seconds (default: 600).
+    pub max_backoff_seconds: u32,
+    /// Maximum delivery attempts (default: 5).
+    pub max_attempts: u32,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            min_backoff_seconds: 10,
+            max_backoff_seconds: 600,
+            max_attempts: 5,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -270,5 +304,48 @@ mod tests {
         assert_eq!(opts.wait_time_seconds, 0);
         assert_eq!(opts.attribute_names.len(), 0);
         assert_eq!(opts.message_attribute_names.len(), 0);
+    }
+
+    #[test]
+    fn test_push_config_validation() {
+        let push_config = PushConfig {
+            endpoint: "https://example.com/webhook".to_string(),
+            retry_policy: Some(RetryPolicy::default()),
+            timeout_seconds: Some(30),
+        };
+
+        assert_eq!(push_config.endpoint, "https://example.com/webhook");
+        assert!(push_config.retry_policy.is_some());
+        assert_eq!(push_config.timeout_seconds, Some(30));
+    }
+
+    #[test]
+    fn test_retry_policy_defaults() {
+        let policy = RetryPolicy::default();
+        assert_eq!(policy.min_backoff_seconds, 10);
+        assert_eq!(policy.max_backoff_seconds, 600);
+        assert_eq!(policy.max_attempts, 5);
+    }
+
+    #[test]
+    fn test_subscription_config_with_push() {
+        let config = SubscriptionConfig {
+            id: "test-sub".to_string(),
+            name: "test-sub".to_string(),
+            topic_id: "test-topic".to_string(),
+            ack_deadline_seconds: 30,
+            message_retention_duration: 604800,
+            enable_message_ordering: false,
+            filter: None,
+            dead_letter_policy: None,
+            push_config: Some(PushConfig {
+                endpoint: "https://example.com/hook".to_string(),
+                retry_policy: None,
+                timeout_seconds: None,
+            }),
+        };
+
+        assert!(config.push_config.is_some());
+        assert_eq!(config.push_config.unwrap().endpoint, "https://example.com/hook");
     }
 }

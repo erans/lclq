@@ -76,6 +76,7 @@ impl SubscriberService {
                     max_delivery_attempts: dlp.max_delivery_attempts as u32,
                 }
             }),
+            push_config: None,
         })
     }
 
@@ -830,6 +831,7 @@ mod tests {
                 dead_letter_topic: "projects/test-project/topics/dlq".to_string(),
                 max_delivery_attempts: 3,
             }),
+            push_config: None,
         };
 
         let subscription = SubscriberService::config_to_subscription(&config);

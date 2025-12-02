@@ -1005,6 +1005,7 @@ mod tests {
             enable_message_ordering: false,
             filter: None,
             dead_letter_policy: None,
+            push_config: None,
         };
         service
             .backend
@@ -1173,6 +1174,7 @@ mod tests {
             enable_message_ordering: false,
             filter: None,
             dead_letter_policy: None,
+            push_config: None,
         };
         service.backend.create_subscription(sub1).await.unwrap();
 
@@ -1185,6 +1187,7 @@ mod tests {
             enable_message_ordering: false,
             filter: None,
             dead_letter_policy: None,
+            push_config: None,
         };
         service.backend.create_subscription(sub2).await.unwrap();
 
