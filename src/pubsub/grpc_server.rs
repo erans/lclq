@@ -6,6 +6,8 @@ use crate::error::Result;
 use crate::pubsub::proto::publisher_server::PublisherServer;
 use crate::pubsub::proto::subscriber_server::SubscriberServer;
 use crate::pubsub::publisher::PublisherService;
+use crate::pubsub::push_queue::DeliveryQueue;
+use crate::pubsub::push_worker::PushWorkerPool;
 use crate::pubsub::subscriber::SubscriberService;
 use crate::storage::StorageBackend;
 use std::sync::Arc;
@@ -43,8 +45,18 @@ pub async fn start_grpc_server(
 
     info!("Starting Pub/Sub gRPC server on {}", addr);
 
+    // Create delivery queue for push subscriptions
+    let delivery_queue = DeliveryQueue::new();
+
+    // Create push worker pool for HTTP delivery
+    let push_worker_pool = PushWorkerPool::new(
+        None, // Use default worker count (2, or LCLQ_PUSH_WORKERS env var)
+        delivery_queue.clone(),
+        backend.clone(),
+    );
+
     // Create service instances
-    let publisher = PublisherService::new(backend.clone());
+    let publisher = PublisherService::new(backend.clone(), Some(delivery_queue));
     let subscriber = SubscriberService::new(backend);
 
     // Build the gRPC server
@@ -57,12 +69,15 @@ pub async fn start_grpc_server(
         });
 
     // Run the server
-    server
+    let server_result = server
         .await
-        .map_err(|e| crate::error::Error::Internal(format!("gRPC server error: {}", e)))?;
+        .map_err(|e| crate::error::Error::Internal(format!("gRPC server error: {}", e)));
+
+    // Shutdown push worker pool gracefully
+    push_worker_pool.shutdown().await;
 
     info!("Pub/Sub gRPC server stopped");
-    Ok(())
+    server_result
 }
 
 #[cfg(test)]
@@ -173,7 +188,7 @@ mod tests {
         let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
 
         // Test that services can be created
-        let publisher = PublisherService::new(backend.clone());
+        let publisher = PublisherService::new(backend.clone(), None);
         let subscriber = SubscriberService::new(backend);
 
         // Services should be created successfully (no panics)

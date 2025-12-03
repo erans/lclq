@@ -54,6 +54,31 @@ impl SubscriberService {
             topic_resource.resource_id()
         );
 
+        // Parse push config if present
+        let push_config = subscription.push_config.as_ref().map(|pc| {
+            let retry_policy = subscription.retry_policy.as_ref().map(|rp| {
+                crate::types::RetryPolicy {
+                    min_backoff_seconds: rp
+                        .minimum_backoff
+                        .as_ref()
+                        .map(|d| d.seconds as u32)
+                        .unwrap_or(10),
+                    max_backoff_seconds: rp
+                        .maximum_backoff
+                        .as_ref()
+                        .map(|d| d.seconds as u32)
+                        .unwrap_or(600),
+                    max_attempts: 5, // Not in proto, use default
+                }
+            });
+
+            crate::types::PushConfig {
+                endpoint: pc.push_endpoint.clone(),
+                retry_policy,
+                timeout_seconds: Some(30), // Default timeout
+            }
+        });
+
         Ok(SubscriptionConfig {
             id: sub_id.clone(),
             name: subscription.name.clone(),
@@ -76,6 +101,7 @@ impl SubscriberService {
                     max_delivery_attempts: dlp.max_delivery_attempts as u32,
                 }
             }),
+            push_config,
         })
     }
 
@@ -99,10 +125,32 @@ impl SubscriberService {
 
         let topic = format!("projects/{}/topics/{}", topic_project, topic_name);
 
+        // Serialize push config
+        let push_config = config.push_config.as_ref().map(|pc| PushConfig {
+            push_endpoint: pc.endpoint.clone(),
+            attributes: std::collections::HashMap::new(),
+            authentication_method: None,
+        });
+
+        let retry_policy = config
+            .push_config
+            .as_ref()
+            .and_then(|pc| pc.retry_policy.as_ref())
+            .map(|rp| RetryPolicy {
+                minimum_backoff: Some(prost_types::Duration {
+                    seconds: rp.min_backoff_seconds as i64,
+                    nanos: 0,
+                }),
+                maximum_backoff: Some(prost_types::Duration {
+                    seconds: rp.max_backoff_seconds as i64,
+                    nanos: 0,
+                }),
+            });
+
         Subscription {
             name: config.name.clone(),
             topic,
-            push_config: None,
+            push_config,
             ack_deadline_seconds: config.ack_deadline_seconds as i32,
             retain_acked_messages: false,
             message_retention_duration: Some(prost_types::Duration {
@@ -120,7 +168,7 @@ impl SubscriberService {
                     dead_letter_topic: dlp.dead_letter_topic.clone(),
                     max_delivery_attempts: dlp.max_delivery_attempts as i32,
                 }),
-            retry_policy: None,
+            retry_policy,
             detached: false,
             enable_exactly_once_delivery: false,
             topic_message_retention_duration: None,
@@ -713,7 +761,7 @@ mod tests {
 
     /// Create a test publisher service (for creating topics).
     fn create_test_publisher(backend: Arc<dyn StorageBackend>) -> PublisherService {
-        PublisherService::new(backend)
+        PublisherService::new(backend, None)
     }
 
     /// Helper to create a test topic.
@@ -830,6 +878,7 @@ mod tests {
                 dead_letter_topic: "projects/test-project/topics/dlq".to_string(),
                 max_delivery_attempts: 3,
             }),
+            push_config: None,
         };
 
         let subscription = SubscriberService::config_to_subscription(&config);
@@ -1871,5 +1920,58 @@ mod tests {
         assert!(result.is_err());
         let status = result.unwrap_err();
         assert_eq!(status.code(), tonic::Code::Unimplemented);
+    }
+
+    // ========================================================================
+    // Push Config Tests
+    // ========================================================================
+
+    #[test]
+    fn test_subscription_to_config_with_push() {
+        let sub = Subscription {
+            name: "projects/test/subscriptions/test-sub".to_string(),
+            topic: "projects/test/topics/test-topic".to_string(),
+            push_config: Some(PushConfig {
+                push_endpoint: "https://example.com/webhook".to_string(),
+                attributes: std::collections::HashMap::new(),
+                authentication_method: None,
+            }),
+            ack_deadline_seconds: 30,
+            retain_acked_messages: false,
+            message_retention_duration: Some(prost_types::Duration {
+                seconds: 604800,
+                nanos: 0,
+            }),
+            labels: std::collections::HashMap::new(),
+            enable_message_ordering: false,
+            expiration_policy: None,
+            filter: String::new(),
+            dead_letter_policy: None,
+            retry_policy: Some(RetryPolicy {
+                minimum_backoff: Some(prost_types::Duration {
+                    seconds: 10,
+                    nanos: 0,
+                }),
+                maximum_backoff: Some(prost_types::Duration {
+                    seconds: 600,
+                    nanos: 0,
+                }),
+            }),
+            detached: false,
+            enable_exactly_once_delivery: false,
+            topic_message_retention_duration: None,
+            state: 0,
+        };
+
+        let config = SubscriberService::subscription_to_config(&sub).unwrap();
+
+        assert!(config.push_config.is_some());
+        let push_config = config.push_config.unwrap();
+        assert_eq!(push_config.endpoint, "https://example.com/webhook");
+        assert!(push_config.retry_policy.is_some());
+
+        let retry_policy = push_config.retry_policy.unwrap();
+        assert_eq!(retry_policy.min_backoff_seconds, 10);
+        assert_eq!(retry_policy.max_backoff_seconds, 600);
     }
 }

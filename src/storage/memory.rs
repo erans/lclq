@@ -1068,4 +1068,85 @@ mod tests {
         let stats = backend.get_stats("test-queue").await.unwrap();
         assert_eq!(stats.available_messages + stats.in_flight_messages, 0);
     }
+
+    // ========================================================================
+    // Subscription Storage Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_memory_backend_push_subscription() {
+        use crate::types::{PushConfig, RetryPolicy};
+
+        let backend = InMemoryBackend::new();
+
+        // Create a subscription with push config
+        let config = SubscriptionConfig {
+            id: "test:push-sub".to_string(),
+            name: "test-push-sub".to_string(),
+            topic_id: "test:topic".to_string(),
+            ack_deadline_seconds: 30,
+            message_retention_duration: 604800,
+            enable_message_ordering: false,
+            filter: None,
+            dead_letter_policy: None,
+            push_config: Some(PushConfig {
+                endpoint: "https://example.com/webhook".to_string(),
+                retry_policy: Some(RetryPolicy {
+                    min_backoff_seconds: 10,
+                    max_backoff_seconds: 600,
+                    max_attempts: 5,
+                }),
+                timeout_seconds: Some(30),
+            }),
+        };
+
+        // Create subscription
+        let created = backend.create_subscription(config.clone()).await.unwrap();
+        assert_eq!(created.id, config.id);
+        assert!(created.push_config.is_some());
+
+        // Retrieve subscription
+        let retrieved = backend.get_subscription(&config.id).await.unwrap();
+        assert_eq!(retrieved.id, config.id);
+
+        // Verify push config was preserved
+        assert!(retrieved.push_config.is_some());
+        let push_config = retrieved.push_config.unwrap();
+        assert_eq!(push_config.endpoint, "https://example.com/webhook");
+        assert!(push_config.retry_policy.is_some());
+
+        let retry = push_config.retry_policy.unwrap();
+        assert_eq!(retry.min_backoff_seconds, 10);
+        assert_eq!(retry.max_backoff_seconds, 600);
+        assert_eq!(retry.max_attempts, 5);
+
+        // List subscriptions
+        let subs = backend.list_subscriptions().await.unwrap();
+        assert_eq!(subs.len(), 1);
+        assert!(subs[0].push_config.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_memory_backend_pull_subscription() {
+        let backend = InMemoryBackend::new();
+
+        // Create a pull subscription (no push config)
+        let config = SubscriptionConfig {
+            id: "test:pull-sub".to_string(),
+            name: "test-pull-sub".to_string(),
+            topic_id: "test:topic".to_string(),
+            ack_deadline_seconds: 30,
+            message_retention_duration: 604800,
+            enable_message_ordering: false,
+            filter: None,
+            dead_letter_policy: None,
+            push_config: None,
+        };
+
+        let created = backend.create_subscription(config.clone()).await.unwrap();
+        assert!(created.push_config.is_none());
+
+        let retrieved = backend.get_subscription(&config.id).await.unwrap();
+        assert!(retrieved.push_config.is_none());
+    }
 }
