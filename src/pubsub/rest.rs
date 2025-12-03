@@ -119,6 +119,19 @@ impl RestState {
                 ));
             };
 
+        // Parse push config if present
+        let push_config = subscription.push_config.as_ref().map(|pc| {
+            crate::types::PushConfig {
+                endpoint: pc.push_endpoint.clone(),
+                retry_policy: Some(crate::types::RetryPolicy {
+                    min_backoff_seconds: 10,
+                    max_backoff_seconds: 600,
+                    max_attempts: 5,
+                }),
+                timeout_seconds: Some(30),
+            }
+        });
+
         Ok(crate::types::SubscriptionConfig {
             id: sub_id,
             name: full_name,
@@ -137,7 +150,7 @@ impl RestState {
                     max_delivery_attempts: dlp.max_delivery_attempts.unwrap_or(5) as u32,
                 }
             }),
-            push_config: None,
+            push_config,
         })
     }
 
@@ -161,10 +174,16 @@ impl RestState {
 
         let topic = format!("projects/{}/topics/{}", topic_project, topic_name);
 
+        // Convert push config if present
+        let push_config = config.push_config.as_ref().map(|pc| PushConfig {
+            push_endpoint: pc.endpoint.clone(),
+            attributes: None,
+        });
+
         Subscription {
             name: Some(config.name.clone()),
             topic,
-            push_config: None,
+            push_config,
             ack_deadline_seconds: Some(config.ack_deadline_seconds as i32),
             retain_acked_messages: Some(false),
             message_retention_duration: Some(format!("{}s", config.message_retention_duration)),
@@ -2278,6 +2297,120 @@ mod tests {
             "projects/test/topics/dlq-topic"
         );
         assert_eq!(response["deadLetterPolicy"]["maxDeliveryAttempts"], 5);
+    }
+
+    #[tokio::test]
+    async fn test_create_subscription_with_push_config() {
+        let app = create_test_app();
+
+        // First create a topic
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test/topics/push-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        // Create subscription with push config
+        let body = serde_json::json!({
+            "topic": "projects/test/topics/push-topic",
+            "pushConfig": {
+                "pushEndpoint": "http://localhost:8080/webhook"
+            },
+            "ackDeadlineSeconds": 60
+        });
+
+        let (status, response) = send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test/subscriptions/push-sub",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            response["name"],
+            "projects/test/subscriptions/push-sub"
+        );
+        // Verify pushConfig is returned in create response
+        assert!(response["pushConfig"].is_object(), "pushConfig should be present in create response");
+        assert_eq!(
+            response["pushConfig"]["pushEndpoint"],
+            "http://localhost:8080/webhook"
+        );
+
+        // Also verify GET returns the pushConfig
+        let (status, get_response) = send_request(
+            app,
+            Method::GET,
+            "/v1/projects/test/subscriptions/push-sub",
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(get_response["pushConfig"].is_object(), "pushConfig should be present in GET response");
+        assert_eq!(
+            get_response["pushConfig"]["pushEndpoint"],
+            "http://localhost:8080/webhook"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_subscription_to_config_with_push_config() {
+        // Test the conversion function directly
+        let subscription = Subscription {
+            name: None,
+            topic: "projects/test/topics/my-topic".to_string(),
+            push_config: Some(PushConfig {
+                push_endpoint: "https://example.com/push".to_string(),
+                attributes: None,
+            }),
+            ack_deadline_seconds: Some(30),
+            retain_acked_messages: None,
+            message_retention_duration: None,
+            labels: None,
+            enable_message_ordering: None,
+            expiration_policy: None,
+            filter: None,
+            dead_letter_policy: None,
+        };
+
+        let config = RestState::subscription_to_config(&subscription, "test", "test-sub").unwrap();
+
+        assert!(config.push_config.is_some(), "push_config should be set");
+        let push_config = config.push_config.unwrap();
+        assert_eq!(push_config.endpoint, "https://example.com/push");
+        assert!(push_config.retry_policy.is_some());
+        assert_eq!(push_config.timeout_seconds, Some(30));
+    }
+
+    #[tokio::test]
+    async fn test_config_to_subscription_with_push_config() {
+        // Test the reverse conversion function
+        let config = crate::types::SubscriptionConfig {
+            id: "test:test-sub".to_string(),
+            name: "projects/test/subscriptions/test-sub".to_string(),
+            topic_id: "test:my-topic".to_string(),
+            ack_deadline_seconds: 10,
+            message_retention_duration: 604800,
+            enable_message_ordering: false,
+            filter: None,
+            dead_letter_policy: None,
+            push_config: Some(crate::types::PushConfig {
+                endpoint: "https://example.com/callback".to_string(),
+                retry_policy: None,
+                timeout_seconds: Some(30),
+            }),
+        };
+
+        let subscription = RestState::config_to_subscription(&config);
+
+        assert!(subscription.push_config.is_some(), "push_config should be present");
+        let push_config = subscription.push_config.unwrap();
+        assert_eq!(push_config.push_endpoint, "https://example.com/callback");
     }
 
     #[tokio::test]
