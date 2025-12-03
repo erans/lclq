@@ -126,12 +126,10 @@ impl SubscriberService {
         let topic = format!("projects/{}/topics/{}", topic_project, topic_name);
 
         // Serialize push config
-        let push_config = config.push_config.as_ref().map(|pc| {
-            PushConfig {
-                push_endpoint: pc.endpoint.clone(),
-                attributes: std::collections::HashMap::new(),
-                authentication_method: None,
-            }
+        let push_config = config.push_config.as_ref().map(|pc| PushConfig {
+            push_endpoint: pc.endpoint.clone(),
+            attributes: std::collections::HashMap::new(),
+            authentication_method: None,
         });
 
         let retry_policy = config

@@ -346,6 +346,9 @@ mod tests {
         };
 
         assert!(config.push_config.is_some());
-        assert_eq!(config.push_config.unwrap().endpoint, "https://example.com/hook");
+        assert_eq!(
+            config.push_config.unwrap().endpoint,
+            "https://example.com/hook"
+        );
     }
 }

@@ -1144,28 +1144,33 @@ impl StorageBackend for SqliteBackend {
         .ok_or_else(|| Error::SubscriptionNotFound(id.to_string()))?;
 
         // Parse dead letter policy
-        let dead_letter_policy = if let Some(topic_id) = row.get::<Option<String>, _>("dead_letter_topic_id") {
-            Some(crate::types::DeadLetterPolicy {
-                dead_letter_topic: topic_id,
-                max_delivery_attempts: row.get::<Option<i64>, _>("max_delivery_attempts")
-                    .map(|a| a as u32)
-                    .unwrap_or(5),
-            })
-        } else {
-            None
-        };
+        let dead_letter_policy =
+            row.get::<Option<String>, _>("dead_letter_topic_id")
+                .map(|topic_id| crate::types::DeadLetterPolicy {
+                    dead_letter_topic: topic_id,
+                    max_delivery_attempts: row
+                        .get::<Option<i64>, _>("max_delivery_attempts")
+                        .map(|a| a as u32)
+                        .unwrap_or(5),
+                });
 
         // Parse push config
         let push_config = if let Some(endpoint) = row.get::<Option<String>, _>("push_endpoint") {
-            let retry_policy = if row.get::<Option<i64>, _>("retry_min_backoff_seconds").is_some() {
+            let retry_policy = if row
+                .get::<Option<i64>, _>("retry_min_backoff_seconds")
+                .is_some()
+            {
                 Some(crate::types::RetryPolicy {
-                    min_backoff_seconds: row.get::<Option<i64>, _>("retry_min_backoff_seconds")
+                    min_backoff_seconds: row
+                        .get::<Option<i64>, _>("retry_min_backoff_seconds")
                         .map(|v| v as u32)
                         .unwrap_or(10),
-                    max_backoff_seconds: row.get::<Option<i64>, _>("retry_max_backoff_seconds")
+                    max_backoff_seconds: row
+                        .get::<Option<i64>, _>("retry_max_backoff_seconds")
                         .map(|v| v as u32)
                         .unwrap_or(600),
-                    max_attempts: row.get::<Option<i64>, _>("retry_max_attempts")
+                    max_attempts: row
+                        .get::<Option<i64>, _>("retry_max_attempts")
                         .map(|v| v as u32)
                         .unwrap_or(5),
                 })
@@ -1176,7 +1181,8 @@ impl StorageBackend for SqliteBackend {
             Some(crate::types::PushConfig {
                 endpoint,
                 retry_policy,
-                timeout_seconds: row.get::<Option<i64>, _>("push_timeout_seconds")
+                timeout_seconds: row
+                    .get::<Option<i64>, _>("push_timeout_seconds")
                     .map(|v| v as u32),
             })
         } else {
@@ -1234,28 +1240,34 @@ impl StorageBackend for SqliteBackend {
         let mut subscriptions = Vec::new();
         for row in rows {
             // Parse dead letter policy
-            let dead_letter_policy = if let Some(topic_id) = row.get::<Option<String>, _>("dead_letter_topic_id") {
-                Some(crate::types::DeadLetterPolicy {
-                    dead_letter_topic: topic_id,
-                    max_delivery_attempts: row.get::<Option<i64>, _>("max_delivery_attempts")
-                        .map(|a| a as u32)
-                        .unwrap_or(5),
-                })
-            } else {
-                None
-            };
+            let dead_letter_policy =
+                row.get::<Option<String>, _>("dead_letter_topic_id")
+                    .map(|topic_id| crate::types::DeadLetterPolicy {
+                        dead_letter_topic: topic_id,
+                        max_delivery_attempts: row
+                            .get::<Option<i64>, _>("max_delivery_attempts")
+                            .map(|a| a as u32)
+                            .unwrap_or(5),
+                    });
 
             // Parse push config
-            let push_config = if let Some(endpoint) = row.get::<Option<String>, _>("push_endpoint") {
-                let retry_policy = if row.get::<Option<i64>, _>("retry_min_backoff_seconds").is_some() {
+            let push_config = if let Some(endpoint) = row.get::<Option<String>, _>("push_endpoint")
+            {
+                let retry_policy = if row
+                    .get::<Option<i64>, _>("retry_min_backoff_seconds")
+                    .is_some()
+                {
                     Some(crate::types::RetryPolicy {
-                        min_backoff_seconds: row.get::<Option<i64>, _>("retry_min_backoff_seconds")
+                        min_backoff_seconds: row
+                            .get::<Option<i64>, _>("retry_min_backoff_seconds")
                             .map(|v| v as u32)
                             .unwrap_or(10),
-                        max_backoff_seconds: row.get::<Option<i64>, _>("retry_max_backoff_seconds")
+                        max_backoff_seconds: row
+                            .get::<Option<i64>, _>("retry_max_backoff_seconds")
                             .map(|v| v as u32)
                             .unwrap_or(600),
-                        max_attempts: row.get::<Option<i64>, _>("retry_max_attempts")
+                        max_attempts: row
+                            .get::<Option<i64>, _>("retry_max_attempts")
                             .map(|v| v as u32)
                             .unwrap_or(5),
                     })
@@ -1266,7 +1278,8 @@ impl StorageBackend for SqliteBackend {
                 Some(crate::types::PushConfig {
                     endpoint,
                     retry_policy,
-                    timeout_seconds: row.get::<Option<i64>, _>("push_timeout_seconds")
+                    timeout_seconds: row
+                        .get::<Option<i64>, _>("push_timeout_seconds")
                         .map(|v| v as u32),
                 })
             } else {
@@ -1286,7 +1299,10 @@ impl StorageBackend for SqliteBackend {
             });
         }
 
-        debug!(count = subscriptions.len(), "Listed subscriptions from SQLite");
+        debug!(
+            count = subscriptions.len(),
+            "Listed subscriptions from SQLite"
+        );
         Ok(subscriptions)
     }
 

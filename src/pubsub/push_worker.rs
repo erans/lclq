@@ -7,8 +7,8 @@ use crate::types::{Message, MessageAttributeValue, MessageId, RetryPolicy, Subsc
 use chrono::Utc;
 use reqwest::Client;
 use serde_json::json;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
@@ -141,7 +141,9 @@ async fn handle_delivery_task(
         &push_config.endpoint,
         &task.message,
         &subscription.name,
-        push_config.timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECONDS),
+        push_config
+            .timeout_seconds
+            .unwrap_or(DEFAULT_TIMEOUT_SECONDS),
     )
     .await;
 
@@ -160,10 +162,7 @@ async fn handle_delivery_task(
 
             // Calculate retry
             let default_policy = RetryPolicy::default();
-            let retry_policy = push_config
-                .retry_policy
-                .as_ref()
-                .unwrap_or(&default_policy);
+            let retry_policy = push_config.retry_policy.as_ref().unwrap_or(&default_policy);
 
             if let Some(retry_task) = calculate_retry(task.clone(), retry_policy) {
                 // Re-enqueue for retry
@@ -295,7 +294,10 @@ async fn handle_max_retries(
             delay_seconds: None,
         };
 
-        if let Err(e) = backend.send_message(&dlp.dead_letter_topic, dlq_message).await {
+        if let Err(e) = backend
+            .send_message(&dlp.dead_letter_topic, dlq_message)
+            .await
+        {
             error!("Failed to send message to DLT: {}", e);
         }
     } else {
