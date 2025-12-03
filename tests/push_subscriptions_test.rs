@@ -1,21 +1,15 @@
 //! Integration tests for push subscriptions.
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::post,
-    Json, Router,
-};
+use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::post};
 use base64::Engine;
-use lclq::pubsub::proto::*;
 use lclq::pubsub::proto::publisher_server::Publisher;
 use lclq::pubsub::proto::subscriber_server::Subscriber;
-use lclq::storage::memory::InMemoryBackend;
+use lclq::pubsub::proto::*;
+use lclq::pubsub::publisher::PublisherService;
 use lclq::pubsub::push_queue::DeliveryQueue;
 use lclq::pubsub::push_worker::PushWorkerPool;
-use lclq::pubsub::publisher::PublisherService;
 use lclq::pubsub::subscriber::SubscriberService;
+use lclq::storage::memory::InMemoryBackend;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -46,9 +40,7 @@ async fn test_push_subscription_delivery() {
         .route("/webhook", post(webhook_handler))
         .with_state(state.clone());
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let webhook_url = format!("http://{}/webhook", addr);
 
@@ -167,9 +159,7 @@ async fn test_push_subscription_retry_on_failure() {
         }),
     );
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let webhook_url = format!("http://{}/webhook", addr);
 
