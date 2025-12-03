@@ -4,7 +4,6 @@ use crate::error::{Error, Result};
 use crate::pubsub::push_queue::{DeliveryQueue, DeliveryTask};
 use crate::storage::StorageBackend;
 use crate::types::{Message, MessageAttributeValue, MessageId, RetryPolicy, SubscriptionConfig};
-use base64::Engine;
 use chrono::Utc;
 use reqwest::Client;
 use serde_json::json;
@@ -186,9 +185,10 @@ async fn deliver_message(
     timeout_seconds: u32,
 ) -> Result<()> {
     // Build JSON payload matching GCP Pub/Sub format
+    // Note: message.body is already base64-encoded by the publisher
     let payload = json!({
         "message": {
-            "data": base64::engine::general_purpose::STANDARD.encode(message.body.as_bytes()),
+            "data": message.body,
             "attributes": message.attributes.iter().map(|(k, v)| {
                 (k.clone(), v.string_value.clone().unwrap_or_default())
             }).collect::<std::collections::HashMap<String, String>>(),
