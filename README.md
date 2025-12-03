@@ -3,7 +3,7 @@
 **Lightning-fast local replacement for AWS SQS and GCP Pub/Sub.**
 Zero configuration. Zero cloud dependencies. 100% SDK compatible.
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Version](https://img.shields.io/badge/version-0.2.0-blue)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-green)
 ![Tests](https://img.shields.io/badge/tests-408%20passing-success)
 
@@ -243,14 +243,63 @@ Fully compatible with official Google Cloud SDKs (gRPC + HTTP/REST).
 
 **Tested:** 53/53 tests passing with Python, JavaScript, and Go SDKs.
 
-### GCP Pub/Sub Push Subscriptions
+### 🔔 GCP Pub/Sub Push Subscriptions
 
-- HTTP/HTTPS webhook delivery
-- Configurable exponential backoff retry
-- Dead letter topic support
-- GCP Pub/Sub compatible JSON format
+**Automatic HTTP delivery** - Messages are pushed to your webhook endpoints automatically. No polling required!
 
-See [Push Subscriptions Documentation](docs/push-subscriptions.md) for details.
+**Key Features:**
+- **HTTP/HTTPS webhook delivery** - Receive messages via HTTP POST to your endpoints
+- **Exponential backoff retry** - Configurable retry policy (default: 10s-600s, 5 attempts)
+- **Dead letter topics** - Failed deliveries automatically sent to DLT after max retries
+- **GCP-compatible format** - JSON payload matches Google Cloud Pub/Sub push format
+- **Lightweight workers** - Default 2 workers (configurable via `LCLQ_PUSH_WORKERS`)
+
+**Quick Example:**
+```python
+from google.cloud import pubsub_v1
+
+subscriber = pubsub_v1.SubscriberClient()
+
+# Create push subscription pointing to your webhook
+subscription = subscriber.create_subscription(
+    request={
+        "name": "projects/my-project/subscriptions/my-push-sub",
+        "topic": "projects/my-project/topics/my-topic",
+        "push_config": {
+            "push_endpoint": "http://your-app.local:8080/webhook"
+        },
+        "retry_policy": {
+            "minimum_backoff": {"seconds": 10},
+            "maximum_backoff": {"seconds": 600}
+        }
+    }
+)
+
+# Messages automatically delivered to your webhook!
+# No pull() calls needed
+```
+
+Your webhook receives:
+```json
+{
+  "message": {
+    "data": "SGVsbG8sIFdvcmxkIQ==",
+    "attributes": {"key": "value"},
+    "messageId": "123",
+    "publishTime": "2025-12-03T10:00:00Z"
+  },
+  "subscription": "projects/my-project/subscriptions/my-push-sub"
+}
+```
+
+Return HTTP 2xx to acknowledge, 4xx/5xx or timeout triggers retry with exponential backoff.
+
+**Environment Variables:**
+```bash
+LCLQ_PUSH_WORKERS=4  # Number of push delivery workers (default: 2)
+```
+
+See [Push Subscriptions Documentation](docs/push-subscriptions.md) for complete guide.
 
 ### 📦 Storage Options
 
@@ -296,7 +345,20 @@ lclq start --sqs-port 9324 --bind-address 0.0.0.0
 
 ### Environment Variables
 ```bash
-LCLQ_SQS_PORT=9324 LCLQ_BIND_ADDRESS=0.0.0.0 lclq start
+# Server ports
+LCLQ_SQS_PORT=9324
+LCLQ_PUBSUB_GRPC_PORT=8085
+LCLQ_PUBSUB_REST_PORT=8086
+LCLQ_BIND_ADDRESS=0.0.0.0
+
+# Push subscriptions
+LCLQ_PUSH_WORKERS=2  # Number of push delivery workers (default: 2)
+
+# Receipt handle security (required for production)
+LCLQ_RECEIPT_SECRET=your-secret-key-here
+
+# Start server
+lclq start
 ```
 
 ### Config File (`lclq.toml`)

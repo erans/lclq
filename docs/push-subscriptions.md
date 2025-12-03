@@ -112,19 +112,43 @@ Failed messages will be published to the DLQ with additional attributes:
 
 ### Worker Pool
 
-Configure the number of push worker threads:
+Configure the number of push delivery worker threads via environment variable:
 
-```toml
-# lclq.toml
-[pubsub.push]
-workers = 16  # Default: num_cpus * 2
+```bash
+# Default: 2 workers
+LCLQ_PUSH_WORKERS=2 lclq start
+
+# For high-throughput scenarios
+LCLQ_PUSH_WORKERS=8 lclq start
+
+# Or set in your environment
+export LCLQ_PUSH_WORKERS=4
+lclq start
 ```
+
+**Worker Pool Sizing:**
+- **Default: 2 workers** - Suitable for most development and testing scenarios
+- **Low traffic**: 1-2 workers
+- **Medium traffic**: 4-8 workers
+- **High traffic**: 16+ workers
+
+Each worker can handle concurrent HTTP requests, so 2 workers is typically sufficient for local development. Increase the worker count if you're testing high-throughput push delivery scenarios.
 
 ### Default Timeout
 
-```toml
-[pubsub.push]
-timeout_seconds = 30  # Default: 30 seconds
+The default HTTP request timeout is 30 seconds per delivery attempt. This can be configured per-subscription via the push config:
+
+```python
+subscription = subscriber.create_subscription(
+    request={
+        "name": subscription_path,
+        "topic": topic_path,
+        "push_config": {
+            "push_endpoint": "https://example.com/webhook"
+        }
+    }
+)
+# Note: Per-subscription timeout configuration coming in future release
 ```
 
 ## Monitoring
