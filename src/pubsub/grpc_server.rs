@@ -50,7 +50,7 @@ pub async fn start_grpc_server(
 
     // Create push worker pool for HTTP delivery
     let push_worker_pool = PushWorkerPool::new(
-        None, // Use default worker count (num_cpus * 2)
+        None, // Use default worker count (2, or LCLQ_PUSH_WORKERS env var)
         delivery_queue.clone(),
         backend.clone(),
     );

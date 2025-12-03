@@ -26,7 +26,7 @@ impl PushWorkerPool {
     /// Create a new worker pool.
     ///
     /// # Arguments
-    /// * `num_workers` - Number of worker threads (default: num_cpus * 2)
+    /// * `num_workers` - Number of worker threads (default: 2, or LCLQ_PUSH_WORKERS env var)
     /// * `delivery_queue` - Shared delivery queue
     /// * `backend` - Storage backend for DLT publishing
     pub fn new(
@@ -34,7 +34,12 @@ impl PushWorkerPool {
         delivery_queue: DeliveryQueue,
         backend: Arc<dyn StorageBackend>,
     ) -> Self {
-        let num_workers = num_workers.unwrap_or_else(|| num_cpus::get() * 2);
+        let num_workers = num_workers.unwrap_or_else(|| {
+            std::env::var("LCLQ_PUSH_WORKERS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(2)
+        });
         let shutdown_signal = Arc::new(AtomicBool::new(false));
 
         let workers = (0..num_workers)
