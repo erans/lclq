@@ -243,6 +243,15 @@ Fully compatible with official Google Cloud SDKs (gRPC + HTTP/REST).
 
 **Tested:** 53/53 tests passing with Python, JavaScript, and Go SDKs.
 
+### GCP Pub/Sub Push Subscriptions
+
+- HTTP/HTTPS webhook delivery
+- Configurable exponential backoff retry
+- Dead letter topic support
+- GCP Pub/Sub compatible JSON format
+
+See [Push Subscriptions Documentation](docs/push-subscriptions.md) for details.
+
 ### 📦 Storage Options
 
 **In-Memory (Default)**
