@@ -120,8 +120,10 @@ impl RestState {
             };
 
         // Parse push config if present
-        let push_config = subscription.push_config.as_ref().map(|pc| {
-            crate::types::PushConfig {
+        let push_config = subscription
+            .push_config
+            .as_ref()
+            .map(|pc| crate::types::PushConfig {
                 endpoint: pc.push_endpoint.clone(),
                 retry_policy: Some(crate::types::RetryPolicy {
                     min_backoff_seconds: 10,
@@ -129,8 +131,7 @@ impl RestState {
                     max_attempts: 5,
                 }),
                 timeout_seconds: Some(30),
-            }
-        });
+            });
 
         Ok(crate::types::SubscriptionConfig {
             id: sub_id,
@@ -2330,12 +2331,12 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(
-            response["name"],
-            "projects/test/subscriptions/push-sub"
-        );
+        assert_eq!(response["name"], "projects/test/subscriptions/push-sub");
         // Verify pushConfig is returned in create response
-        assert!(response["pushConfig"].is_object(), "pushConfig should be present in create response");
+        assert!(
+            response["pushConfig"].is_object(),
+            "pushConfig should be present in create response"
+        );
         assert_eq!(
             response["pushConfig"]["pushEndpoint"],
             "http://localhost:8080/webhook"
@@ -2351,7 +2352,10 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::OK);
-        assert!(get_response["pushConfig"].is_object(), "pushConfig should be present in GET response");
+        assert!(
+            get_response["pushConfig"].is_object(),
+            "pushConfig should be present in GET response"
+        );
         assert_eq!(
             get_response["pushConfig"]["pushEndpoint"],
             "http://localhost:8080/webhook"
@@ -2408,7 +2412,10 @@ mod tests {
 
         let subscription = RestState::config_to_subscription(&config);
 
-        assert!(subscription.push_config.is_some(), "push_config should be present");
+        assert!(
+            subscription.push_config.is_some(),
+            "push_config should be present"
+        );
         let push_config = subscription.push_config.unwrap();
         assert_eq!(push_config.push_endpoint, "https://example.com/callback");
     }
