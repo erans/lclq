@@ -116,7 +116,14 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     -- Configuration
     ack_deadline_seconds INTEGER NOT NULL DEFAULT 10,
 
-    -- Push configuration (JSON) - optional
+    -- Push configuration (individual fields for better queryability)
+    push_endpoint TEXT,
+    retry_min_backoff_seconds INTEGER,
+    retry_max_backoff_seconds INTEGER,
+    retry_max_attempts INTEGER,
+    push_timeout_seconds INTEGER,
+
+    -- Push configuration (JSON) - deprecated, kept for backward compatibility
     push_config TEXT,  -- JSON: {"push_endpoint": "...", "attributes": {...}}
 
     -- Message ordering
@@ -170,3 +177,6 @@ CREATE TABLE IF NOT EXISTS subscription_messages (
 -- Indexes for subscription message queries
 CREATE INDEX IF NOT EXISTS idx_sub_msgs_state ON subscription_messages(subscription_id, state);
 CREATE INDEX IF NOT EXISTS idx_sub_msgs_ack_deadline ON subscription_messages(ack_deadline_at);
+
+-- Index for querying push subscriptions
+CREATE INDEX IF NOT EXISTS idx_subscriptions_push_endpoint ON subscriptions(push_endpoint);

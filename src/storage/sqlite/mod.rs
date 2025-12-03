@@ -1056,24 +1056,238 @@ impl StorageBackend for SqliteBackend {
         }
     }
 
-    // Pub/Sub subscription methods (future implementation)
+    // Pub/Sub subscription methods
     async fn create_subscription(
         &self,
-        _config: crate::types::SubscriptionConfig,
+        config: crate::types::SubscriptionConfig,
     ) -> Result<crate::types::SubscriptionConfig> {
-        Err(Error::NotImplemented("create_subscription".to_string()))
+        debug!(subscription_id = %config.id, topic_id = %config.topic_id, "Creating subscription in SQLite");
+
+        let now = Utc::now().timestamp();
+
+        // Extract push config fields
+        let (push_endpoint, retry_min_backoff, retry_max_backoff, retry_max_attempts, push_timeout) =
+            if let Some(ref push_config) = config.push_config {
+                let retry = push_config.retry_policy.as_ref();
+                (
+                    Some(push_config.endpoint.clone()),
+                    retry.map(|r| r.min_backoff_seconds as i64),
+                    retry.map(|r| r.max_backoff_seconds as i64),
+                    retry.map(|r| r.max_attempts as i64),
+                    push_config.timeout_seconds.map(|t| t as i64),
+                )
+            } else {
+                (None, None, None, None, None)
+            };
+
+        sqlx::query(
+            r#"
+            INSERT INTO subscriptions (
+                id, name, topic_id, ack_deadline_seconds, enable_message_ordering,
+                filter, dead_letter_topic_id, max_delivery_attempts,
+                retain_acked_messages, message_retention_duration,
+                push_endpoint, retry_min_backoff_seconds, retry_max_backoff_seconds,
+                retry_max_attempts, push_timeout_seconds,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&config.id)
+        .bind(&config.name)
+        .bind(&config.topic_id)
+        .bind(config.ack_deadline_seconds as i64)
+        .bind(config.enable_message_ordering)
+        .bind(&config.filter)
+        .bind(config.dead_letter_policy.as_ref().map(|dlp| dlp.dead_letter_topic.clone()))
+        .bind(config.dead_letter_policy.as_ref().map(|dlp| dlp.max_delivery_attempts as i64))
+        .bind(false) // retain_acked_messages - not in SubscriptionConfig yet
+        .bind(config.message_retention_duration as i64)
+        .bind(push_endpoint)
+        .bind(retry_min_backoff)
+        .bind(retry_max_backoff)
+        .bind(retry_max_attempts)
+        .bind(push_timeout)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("UNIQUE constraint failed") {
+                Error::StorageError(format!("Subscription {} already exists", config.id))
+            } else {
+                Error::StorageError(format!("Failed to create subscription: {}", e))
+            }
+        })?;
+
+        info!(subscription_id = %config.id, "Subscription created in SQLite");
+        Ok(config)
     }
 
-    async fn get_subscription(&self, _id: &str) -> Result<crate::types::SubscriptionConfig> {
-        Err(Error::NotImplemented("get_subscription".to_string()))
+    async fn get_subscription(&self, id: &str) -> Result<crate::types::SubscriptionConfig> {
+        debug!(subscription_id = %id, "Getting subscription from SQLite");
+
+        let row = sqlx::query(
+            r#"
+            SELECT id, name, topic_id, ack_deadline_seconds, enable_message_ordering,
+                   filter, dead_letter_topic_id, max_delivery_attempts,
+                   message_retention_duration,
+                   push_endpoint, retry_min_backoff_seconds, retry_max_backoff_seconds,
+                   retry_max_attempts, push_timeout_seconds
+            FROM subscriptions
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| Error::StorageError(format!("Failed to get subscription: {}", e)))?
+        .ok_or_else(|| Error::SubscriptionNotFound(id.to_string()))?;
+
+        // Parse dead letter policy
+        let dead_letter_policy = if let Some(topic_id) = row.get::<Option<String>, _>("dead_letter_topic_id") {
+            Some(crate::types::DeadLetterPolicy {
+                dead_letter_topic: topic_id,
+                max_delivery_attempts: row.get::<Option<i64>, _>("max_delivery_attempts")
+                    .map(|a| a as u32)
+                    .unwrap_or(5),
+            })
+        } else {
+            None
+        };
+
+        // Parse push config
+        let push_config = if let Some(endpoint) = row.get::<Option<String>, _>("push_endpoint") {
+            let retry_policy = if row.get::<Option<i64>, _>("retry_min_backoff_seconds").is_some() {
+                Some(crate::types::RetryPolicy {
+                    min_backoff_seconds: row.get::<Option<i64>, _>("retry_min_backoff_seconds")
+                        .map(|v| v as u32)
+                        .unwrap_or(10),
+                    max_backoff_seconds: row.get::<Option<i64>, _>("retry_max_backoff_seconds")
+                        .map(|v| v as u32)
+                        .unwrap_or(600),
+                    max_attempts: row.get::<Option<i64>, _>("retry_max_attempts")
+                        .map(|v| v as u32)
+                        .unwrap_or(5),
+                })
+            } else {
+                None
+            };
+
+            Some(crate::types::PushConfig {
+                endpoint,
+                retry_policy,
+                timeout_seconds: row.get::<Option<i64>, _>("push_timeout_seconds")
+                    .map(|v| v as u32),
+            })
+        } else {
+            None
+        };
+
+        Ok(crate::types::SubscriptionConfig {
+            id: row.get("id"),
+            name: row.get("name"),
+            topic_id: row.get("topic_id"),
+            ack_deadline_seconds: row.get::<i64, _>("ack_deadline_seconds") as u32,
+            message_retention_duration: row.get::<i64, _>("message_retention_duration") as u32,
+            enable_message_ordering: row.get("enable_message_ordering"),
+            filter: row.get("filter"),
+            dead_letter_policy,
+            push_config,
+        })
     }
 
-    async fn delete_subscription(&self, _id: &str) -> Result<()> {
-        Err(Error::NotImplemented("delete_subscription".to_string()))
+    async fn delete_subscription(&self, id: &str) -> Result<()> {
+        debug!(subscription_id = %id, "Deleting subscription from SQLite");
+
+        let result = sqlx::query("DELETE FROM subscriptions WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::StorageError(format!("Failed to delete subscription: {}", e)))?;
+
+        if result.rows_affected() == 0 {
+            return Err(Error::SubscriptionNotFound(id.to_string()));
+        }
+
+        info!(subscription_id = %id, "Subscription deleted from SQLite");
+        Ok(())
     }
 
     async fn list_subscriptions(&self) -> Result<Vec<crate::types::SubscriptionConfig>> {
-        Err(Error::NotImplemented("list_subscriptions".to_string()))
+        debug!("Listing subscriptions from SQLite");
+
+        let rows = sqlx::query(
+            r#"
+            SELECT id, name, topic_id, ack_deadline_seconds, enable_message_ordering,
+                   filter, dead_letter_topic_id, max_delivery_attempts,
+                   message_retention_duration,
+                   push_endpoint, retry_min_backoff_seconds, retry_max_backoff_seconds,
+                   retry_max_attempts, push_timeout_seconds
+            FROM subscriptions
+            ORDER BY name
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::StorageError(format!("Failed to list subscriptions: {}", e)))?;
+
+        let mut subscriptions = Vec::new();
+        for row in rows {
+            // Parse dead letter policy
+            let dead_letter_policy = if let Some(topic_id) = row.get::<Option<String>, _>("dead_letter_topic_id") {
+                Some(crate::types::DeadLetterPolicy {
+                    dead_letter_topic: topic_id,
+                    max_delivery_attempts: row.get::<Option<i64>, _>("max_delivery_attempts")
+                        .map(|a| a as u32)
+                        .unwrap_or(5),
+                })
+            } else {
+                None
+            };
+
+            // Parse push config
+            let push_config = if let Some(endpoint) = row.get::<Option<String>, _>("push_endpoint") {
+                let retry_policy = if row.get::<Option<i64>, _>("retry_min_backoff_seconds").is_some() {
+                    Some(crate::types::RetryPolicy {
+                        min_backoff_seconds: row.get::<Option<i64>, _>("retry_min_backoff_seconds")
+                            .map(|v| v as u32)
+                            .unwrap_or(10),
+                        max_backoff_seconds: row.get::<Option<i64>, _>("retry_max_backoff_seconds")
+                            .map(|v| v as u32)
+                            .unwrap_or(600),
+                        max_attempts: row.get::<Option<i64>, _>("retry_max_attempts")
+                            .map(|v| v as u32)
+                            .unwrap_or(5),
+                    })
+                } else {
+                    None
+                };
+
+                Some(crate::types::PushConfig {
+                    endpoint,
+                    retry_policy,
+                    timeout_seconds: row.get::<Option<i64>, _>("push_timeout_seconds")
+                        .map(|v| v as u32),
+                })
+            } else {
+                None
+            };
+
+            subscriptions.push(crate::types::SubscriptionConfig {
+                id: row.get("id"),
+                name: row.get("name"),
+                topic_id: row.get("topic_id"),
+                ack_deadline_seconds: row.get::<i64, _>("ack_deadline_seconds") as u32,
+                message_retention_duration: row.get::<i64, _>("message_retention_duration") as u32,
+                enable_message_ordering: row.get("enable_message_ordering"),
+                filter: row.get("filter"),
+                dead_letter_policy,
+                push_config,
+            });
+        }
+
+        debug!(count = subscriptions.len(), "Listed subscriptions from SQLite");
+        Ok(subscriptions)
     }
 
     async fn process_expired_visibility(&self, queue_id: &str) -> Result<u64> {
