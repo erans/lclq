@@ -22,6 +22,7 @@
 //! - `POST /v1/projects/{project}/subscriptions/{subscription}:modifyAckDeadline` - Modify ack deadline
 
 use crate::error::Result;
+use crate::pubsub::push_queue::{DeliveryQueue, DeliveryTask};
 use crate::storage::StorageBackend;
 use axum::{
     Json, Router,
@@ -33,6 +34,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::{debug, info};
 
 /// Configuration for the Pub/Sub REST server.
@@ -46,12 +48,16 @@ pub struct RestServerConfig {
 #[derive(Clone)]
 pub struct RestState {
     backend: Arc<dyn StorageBackend>,
+    delivery_queue: Option<DeliveryQueue>,
 }
 
 impl RestState {
     /// Create a new REST state.
-    pub fn new(backend: Arc<dyn StorageBackend>) -> Self {
-        Self { backend }
+    pub fn new(backend: Arc<dyn StorageBackend>, delivery_queue: Option<DeliveryQueue>) -> Self {
+        Self {
+            backend,
+            delivery_queue,
+        }
     }
 
     /// Convert REST Topic to internal QueueConfig.
@@ -599,11 +605,12 @@ pub fn create_router(state: RestState) -> Router {
 pub async fn start_rest_server(
     config: RestServerConfig,
     backend: Arc<dyn StorageBackend>,
+    delivery_queue: Option<DeliveryQueue>,
     mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<()> {
     info!("Starting Pub/Sub REST server on {}", config.bind_address);
 
-    let state = RestState::new(backend);
+    let state = RestState::new(backend, delivery_queue);
     let app = create_router(state);
 
     let listener = tokio::net::TcpListener::bind(&config.bind_address).await?;
@@ -784,7 +791,7 @@ async fn publish(
     State(state): State<RestState>,
     Json(payload): Json<PublishRequest>,
 ) -> std::result::Result<Json<PublishResponse>, ErrorResponse> {
-    debug!(
+    info!(
         "REST: Publish {} messages to {}/{}",
         payload.messages.len(),
         project,
@@ -808,21 +815,90 @@ async fn publish(
         .map(|msg| RestState::pubsub_message_to_message(msg, &topic_id))
         .collect();
 
-    // Publish messages
-    let published = state
-        .backend
-        .send_messages(&topic_id, messages)
-        .await
-        .map_err(|e| {
-            ErrorResponse::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to publish messages: {}", e),
-            )
-        })?;
+    // Get all subscriptions for this topic
+    let all_subscriptions = state.backend.list_subscriptions().await.map_err(|e| {
+        ErrorResponse::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to list subscriptions: {}", e),
+        )
+    })?;
+
+    let topic_subscriptions: Vec<_> = all_subscriptions
+        .into_iter()
+        .filter(|s| s.topic_id == topic_id)
+        .collect();
+
+    debug!(
+        "REST: Fanout topic_id={}, subscriptions={}, messages={}",
+        topic_id,
+        topic_subscriptions.len(),
+        messages.len()
+    );
+
+    // Fanout messages to all subscriptions
+    let mut message_ids = Vec::new();
+    if topic_subscriptions.is_empty() {
+        // No subscriptions - just return the message IDs without storing
+        message_ids = messages.iter().map(|m| m.id.0.clone()).collect();
+    } else {
+        // Publish to each subscription
+        for sub in &topic_subscriptions {
+            debug!("REST: Fanning out to subscription: {}", sub.id);
+
+            // Clone messages for this subscription (each subscription gets its own copy)
+            let sub_messages: Vec<_> = messages
+                .iter()
+                .map(|m| {
+                    let mut msg = m.clone();
+                    msg.queue_id = sub.id.clone();
+                    msg
+                })
+                .collect();
+
+            let published = state
+                .backend
+                .send_messages(&sub.id, sub_messages)
+                .await
+                .map_err(|e| {
+                    ErrorResponse::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!(
+                            "Failed to publish messages to subscription {}: {}",
+                            sub.id, e
+                        ),
+                    )
+                })?;
+
+            // Use message IDs from first subscription
+            if message_ids.is_empty() {
+                message_ids = published.iter().map(|m| m.id.0.clone()).collect();
+            }
+        }
+
+        // Enqueue push subscriptions for delivery
+        if let Some(ref queue) = state.delivery_queue {
+            for sub in &topic_subscriptions {
+                if sub.push_config.is_some() {
+                    for message in &messages {
+                        let task = DeliveryTask {
+                            message: message.clone(),
+                            subscription: Arc::new(sub.clone()),
+                            attempt: 0,
+                            scheduled_time: Instant::now(),
+                        };
+                        queue.enqueue(task).await;
+                    }
+                    debug!(
+                        "REST: Enqueued {} messages for push delivery to {}",
+                        messages.len(),
+                        sub.id
+                    );
+                }
+            }
+        }
+    }
 
     // Build response with message IDs
-    let message_ids: Vec<String> = published.iter().map(|m| m.id.0.clone()).collect();
-
     let response = PublishResponse { message_ids };
     Ok(Json(response))
 }
@@ -882,7 +958,34 @@ async fn create_subscription(
             )
         })?;
 
-    // Create in backend
+    // Create a queue for this subscription to store its messages
+    let sub_queue_config = crate::types::QueueConfig {
+        id: config.id.clone(),
+        name: config.name.clone(),
+        queue_type: crate::types::QueueType::PubSubTopic, // Subscriptions use PubSubTopic queue type
+        visibility_timeout: config.ack_deadline_seconds,
+        message_retention_period: 604800,   // 7 days
+        max_message_size: 10 * 1024 * 1024, // 10 MB
+        delay_seconds: 0,
+        dlq_config: None,
+        content_based_deduplication: false,
+        tags: std::collections::HashMap::new(),
+        redrive_allow_policy: None,
+    };
+
+    // Create the queue first
+    state
+        .backend
+        .create_queue(sub_queue_config)
+        .await
+        .map_err(|e| {
+            ErrorResponse::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create subscription queue: {}", e),
+            )
+        })?;
+
+    // Create subscription metadata in backend
     let created_config = state
         .backend
         .create_subscription(config)
@@ -1056,7 +1159,7 @@ async fn pull(
         )
     })?;
 
-    // Receive messages from topic
+    // Receive messages from subscription queue
     let options = crate::types::ReceiveOptions {
         max_messages: payload.max_messages as u32,
         visibility_timeout: Some(config.ack_deadline_seconds),
@@ -1067,7 +1170,7 @@ async fn pull(
 
     let messages = state
         .backend
-        .receive_messages(&config.topic_id, options)
+        .receive_messages(&sub_id, options)
         .await
         .map_err(|e| {
             ErrorResponse::new(
@@ -1115,8 +1218,8 @@ async fn acknowledge(
 
     let sub_id = format!("{}:{}", project, subscription);
 
-    // Get subscription config to find topic
-    let config = state.backend.get_subscription(&sub_id).await.map_err(|_| {
+    // Verify subscription exists
+    let _config = state.backend.get_subscription(&sub_id).await.map_err(|_| {
         ErrorResponse::new(
             StatusCode::NOT_FOUND,
             format!("Subscription not found: {}/{}", project, subscription),
@@ -1127,7 +1230,7 @@ async fn acknowledge(
     for ack_id in &payload.ack_ids {
         state
             .backend
-            .delete_message(&config.topic_id, ack_id)
+            .delete_message(&sub_id, ack_id)
             .await
             .map_err(|e| {
                 ErrorResponse::new(
@@ -1154,8 +1257,8 @@ async fn modify_ack_deadline(
 
     let sub_id = format!("{}:{}", project, subscription);
 
-    // Get subscription config to find topic
-    let config = state.backend.get_subscription(&sub_id).await.map_err(|_| {
+    // Verify subscription exists
+    let _config = state.backend.get_subscription(&sub_id).await.map_err(|_| {
         ErrorResponse::new(
             StatusCode::NOT_FOUND,
             format!("Subscription not found: {}/{}", project, subscription),
@@ -1166,11 +1269,7 @@ async fn modify_ack_deadline(
     for ack_id in &payload.ack_ids {
         state
             .backend
-            .change_visibility(
-                &config.topic_id,
-                ack_id,
-                payload.ack_deadline_seconds as u32,
-            )
+            .change_visibility(&sub_id, ack_id, payload.ack_deadline_seconds as u32)
             .await
             .map_err(|e| {
                 ErrorResponse::new(
@@ -1196,13 +1295,27 @@ mod tests {
     /// Create a test state with an in-memory backend.
     fn create_test_state() -> RestState {
         let backend = Arc::new(InMemoryBackend::new());
-        RestState::new(backend)
+        RestState::new(backend, None)
+    }
+
+    /// Create a test state with delivery queue for push testing.
+    fn create_test_state_with_queue() -> (RestState, DeliveryQueue) {
+        let backend = Arc::new(InMemoryBackend::new());
+        let queue = DeliveryQueue::new();
+        let state = RestState::new(backend, Some(queue.clone()));
+        (state, queue)
     }
 
     /// Helper to create a test app with the REST router.
     fn create_test_app() -> Router {
         let state = create_test_state();
         create_router(state)
+    }
+
+    /// Helper to create a test app with delivery queue for push testing.
+    fn create_test_app_with_queue() -> (Router, DeliveryQueue) {
+        let (state, queue) = create_test_state_with_queue();
+        (create_router(state), queue)
     }
 
     /// Helper to send a request and get the response.
@@ -2526,7 +2639,9 @@ mod tests {
 
         // Start server in background
         let server_handle =
-            tokio::spawn(async move { start_rest_server(config, backend, shutdown_rx).await });
+            tokio::spawn(
+                async move { start_rest_server(config, backend, None, shutdown_rx).await },
+            );
 
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -2647,5 +2762,60 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_publish_enqueues_push_subscription_messages() {
+        let (app, queue) = create_test_app_with_queue();
+
+        // Create topic
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test/topics/push-test-topic",
+            Some(serde_json::json!({})),
+        )
+        .await;
+
+        // Create subscription with push config
+        send_request(
+            app.clone(),
+            Method::PUT,
+            "/v1/projects/test/subscriptions/push-test-sub",
+            Some(serde_json::json!({
+                "topic": "projects/test/topics/push-test-topic",
+                "pushConfig": {
+                    "pushEndpoint": "http://localhost:9999/webhook"
+                }
+            })),
+        )
+        .await;
+
+        // Publish a message
+        let data = general_purpose::STANDARD.encode("Push test message");
+        let (status, response) = send_request(
+            app,
+            Method::POST,
+            "/v1/projects/test/topics/push-test-topic:publish",
+            Some(serde_json::json!({
+                "messages": [{"data": data}]
+            })),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["messageIds"].as_array().unwrap().len(), 1);
+
+        // Verify message was enqueued in delivery queue
+        let task = queue.dequeue_ready().await;
+        assert!(
+            task.is_some(),
+            "Message should be enqueued for push delivery"
+        );
+        let task = task.unwrap();
+        assert_eq!(
+            task.subscription.push_config.as_ref().unwrap().endpoint,
+            "http://localhost:9999/webhook"
+        );
     }
 }

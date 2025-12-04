@@ -33,9 +33,13 @@ impl Default for GrpcServerConfig {
 ///
 /// This creates a Tonic gRPC server that hosts both Publisher and Subscriber services.
 /// The server will run until a shutdown signal is received.
+///
+/// If `delivery_queue` is None, a new queue and push worker pool will be created internally.
+/// If provided, the caller is responsible for managing the push worker pool.
 pub async fn start_grpc_server(
     config: GrpcServerConfig,
     backend: Arc<dyn StorageBackend>,
+    delivery_queue: Option<DeliveryQueue>,
     shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<()> {
     let addr = config
@@ -45,15 +49,20 @@ pub async fn start_grpc_server(
 
     info!("Starting Pub/Sub gRPC server on {}", addr);
 
-    // Create delivery queue for push subscriptions
-    let delivery_queue = DeliveryQueue::new();
-
-    // Create push worker pool for HTTP delivery
-    let push_worker_pool = PushWorkerPool::new(
-        None, // Use default worker count (2, or LCLQ_PUSH_WORKERS env var)
-        delivery_queue.clone(),
-        backend.clone(),
-    );
+    // Use provided queue or create new one with worker pool
+    let (delivery_queue, push_worker_pool) = if let Some(queue) = delivery_queue {
+        // External queue provided - caller manages worker pool
+        (queue, None)
+    } else {
+        // Create delivery queue and worker pool internally
+        let queue = DeliveryQueue::new();
+        let pool = PushWorkerPool::new(
+            None, // Use default worker count (2, or LCLQ_PUSH_WORKERS env var)
+            queue.clone(),
+            backend.clone(),
+        );
+        (queue, Some(pool))
+    };
 
     // Create service instances
     let publisher = PublisherService::new(backend.clone(), Some(delivery_queue));
@@ -73,8 +82,10 @@ pub async fn start_grpc_server(
         .await
         .map_err(|e| crate::error::Error::Internal(format!("gRPC server error: {}", e)));
 
-    // Shutdown push worker pool gracefully
-    push_worker_pool.shutdown().await;
+    // Shutdown push worker pool gracefully (only if we created it)
+    if let Some(pool) = push_worker_pool {
+        pool.shutdown().await;
+    }
 
     info!("Pub/Sub gRPC server stopped");
     server_result
@@ -122,7 +133,7 @@ mod tests {
         let backend = Arc::new(InMemoryBackend::new()) as Arc<dyn StorageBackend>;
         let (_shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
 
-        let result = start_grpc_server(config, backend, shutdown_rx).await;
+        let result = start_grpc_server(config, backend, None, shutdown_rx).await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -140,7 +151,9 @@ mod tests {
 
         // Start server in background
         let server_handle =
-            tokio::spawn(async move { start_grpc_server(config, backend, shutdown_rx).await });
+            tokio::spawn(
+                async move { start_grpc_server(config, backend, None, shutdown_rx).await },
+            );
 
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -169,7 +182,9 @@ mod tests {
 
         // Start server
         let server_handle =
-            tokio::spawn(async move { start_grpc_server(config, backend, shutdown_rx).await });
+            tokio::spawn(
+                async move { start_grpc_server(config, backend, None, shutdown_rx).await },
+            );
 
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
