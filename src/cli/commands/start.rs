@@ -9,6 +9,8 @@ use crate::config::LclqConfig;
 use crate::core::cleanup::CleanupManager;
 use crate::core::visibility::VisibilityManager;
 use crate::pubsub::grpc_server::{GrpcServerConfig, start_grpc_server};
+use crate::pubsub::push_queue::DeliveryQueue;
+use crate::pubsub::push_worker::PushWorkerPool;
 use crate::pubsub::rest::{RestServerConfig, start_rest_server};
 use crate::server::admin::start_admin_server;
 use crate::server::metrics::start_metrics_server;
@@ -168,16 +170,34 @@ pub async fn execute(
     }
 
     // Conditionally start Pub/Sub servers
+    let mut push_worker_pool: Option<PushWorkerPool> = None;
     if !disable_pubsub {
+        // Create shared delivery queue for push subscriptions
+        let delivery_queue = DeliveryQueue::new();
+
+        // Create push worker pool for HTTP delivery (shared between gRPC and REST)
+        let worker_pool = PushWorkerPool::new(
+            None, // Use default worker count (2, or LCLQ_PUSH_WORKERS env var)
+            delivery_queue.clone(),
+            storage_backend.clone(),
+        );
+        push_worker_pool = Some(worker_pool);
+
         // Start Pub/Sub gRPC server in background
         let pubsub_grpc_shutdown_rx = shutdown_signal.subscribe();
         let pubsub_grpc_bind_address = bind_address.clone();
+        let grpc_delivery_queue = delivery_queue.clone();
         let pubsub_grpc_handle = tokio::spawn(async move {
             let grpc_config = GrpcServerConfig {
                 bind_address: format!("{}:{}", pubsub_grpc_bind_address, pubsub_port),
             };
-            if let Err(e) =
-                start_grpc_server(grpc_config, pubsub_grpc_backend, pubsub_grpc_shutdown_rx).await
+            if let Err(e) = start_grpc_server(
+                grpc_config,
+                pubsub_grpc_backend,
+                Some(grpc_delivery_queue),
+                pubsub_grpc_shutdown_rx,
+            )
+            .await
             {
                 tracing::error!("Pub/Sub gRPC server error: {}", e);
             }
@@ -187,12 +207,18 @@ pub async fn execute(
         // Start Pub/Sub REST server in background
         let pubsub_rest_shutdown_rx = shutdown_signal.subscribe();
         let pubsub_rest_bind_address = bind_address.clone();
+        let rest_delivery_queue = delivery_queue.clone();
         let pubsub_rest_handle = tokio::spawn(async move {
             let rest_config = RestServerConfig {
                 bind_address: format!("{}:{}", pubsub_rest_bind_address, pubsub_rest_port),
             };
-            if let Err(e) =
-                start_rest_server(rest_config, pubsub_rest_backend, pubsub_rest_shutdown_rx).await
+            if let Err(e) = start_rest_server(
+                rest_config,
+                pubsub_rest_backend,
+                Some(rest_delivery_queue),
+                pubsub_rest_shutdown_rx,
+            )
+            .await
             {
                 tracing::error!("Pub/Sub REST server error: {}", e);
             }
@@ -208,6 +234,11 @@ pub async fn execute(
     // Wait for all servers to complete shutdown
     for handle in server_handles {
         let _ = handle.await;
+    }
+
+    // Shutdown push worker pool gracefully
+    if let Some(pool) = push_worker_pool {
+        pool.shutdown().await;
     }
 
     info!("All servers shut down. Exiting.");
